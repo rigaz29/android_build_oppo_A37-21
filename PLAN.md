@@ -314,6 +314,27 @@ soal kamera, tapi harus diselesaikan sebelum Fase 1 bisa diverifikasi:
 Keduanya disingkirkan **sementara** di tree lokal untuk mengisolasi verifikasi
 kamera; **belum ada perbaikan sebenarnya** dan tidak di-commit ke device tree.
 
+**Hasil build isolasi (15:00, `cam-build7.log`): tetap gagal — dan lagi-lagi bukan
+karena kamera.** Berkas kamera **belum sempat dikompilasi sama sekali**; build berhenti
+di `enforce-product-packages-exist` (`main.mk:1377`) dengan **27 modul tidak ada**,
+karena `A37-21.xml` sengaja masih minimal:
+
+| Modul hilang | Repo penyedianya (belum di manifest) |
+|---|---|
+| `audio.primary.msm8916`, `libOmx*` (8), `libmm-omxcore`, `libstagefrighthw`, `libqcompostprocbundle`, `libqcomvisualizer`, `libqcomvoiceprocessing` | `hardware/qcom-caf/msm8916/{audio,media}` |
+| `copybit.msm8916`, `gralloc.msm8916`, `hwcomposer.msm8916`, `memtrack.msm8916` | `hardware/qcom-caf/msm8916/display` |
+| `TimeKeep`, `timekeep` | `hardware/sony/timekeep` |
+| `vendor.lineage.trust@1.0-service` | `hardware/lineage/interfaces` |
+| `android.hardware.wifi@1.0-service`, `libbt-vendor` | qcom wlan / bt |
+| `FMRadio` | disingkirkan sementara (butuh `libfmjni`) |
+| `android.hardware.drm@1.4-service.clearkey` | ⚠️ ada di LOS 20, **tidak ada di LOS 21** — kemungkinan pindah ke AIDL. Sekelas dengan perubahan @1.3→@1.4 di proyek 20 |
+| `com.android.tethering.inprocess` | varian APEX |
+
+**Kesimpulan urutan:** Fase 1 **tidak bisa diverifikasi tanpa Fase 2 lebih dulu.** Rencana
+ini menaruh kamera di depan karena risikonya paling tak berbatas — itu tetap benar sebagai
+prioritas *analisis*, tapi **verifikasi kompilasinya menuntut manifest yang lengkap**.
+Urutan eksekusi yang benar: Fase 2 (manifest lengkap) → Fase 1 (adaptasi + build kamera).
+
 ```
 Fase 0  Persiapan        ── disk, branch kerja lineage-21, envsetup
 Fase 1  KAMERA           ── port device1/ dari UL 20 → official 21; m libcameraservice rc=0
