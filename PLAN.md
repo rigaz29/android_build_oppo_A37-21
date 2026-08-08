@@ -330,6 +330,36 @@ karena `A37-21.xml` sengaja masih minimal:
 | `android.hardware.drm@1.4-service.clearkey` | ⚠️ ada di LOS 20, **tidak ada di LOS 21** — kemungkinan pindah ke AIDL. Sekelas dengan perubahan @1.3→@1.4 di proyek 20 |
 | `com.android.tethering.inprocess` | varian APEX |
 
+### Fase 2 — manifest dilengkapi (8 Agustus 2026)
+
+`A37-21.xml` naik dari 3 project (draf) jadi **8 project**, seluruh SHA dipin:
+
+| path | sumber | menyelesaikan |
+|---|---|---|
+| `device/oppo/A37` | `rigaz29/rb_device_oppo_A37` `lineage-21` | — |
+| `kernel/oppo/msm8939` | `rigaz29/kernel_oppo_msm8939` `lineage-21` | — |
+| `vendor/oppo` | `rigaz29/rb-vendor_oppo_A37` @ `2e5c6f7` | — |
+| `hardware/qcom-caf/msm8916/audio` | UL `lineage-21.0-caf-msm8916` @ `4eeadcd` | `audio.primary.msm8916`, `libqcom*` |
+| `hardware/qcom-caf/msm8916/display` | UL @ `6d408c9` | `copybit`/`gralloc`/`hwcomposer`/`memtrack.msm8916` |
+| `hardware/qcom-caf/msm8916/media` | UL @ `ee0cb10` | `libOmx*` (8), `libmm-omxcore`, `libstagefrighthw` |
+| `device/qcom/sepolicy-legacy` | UL `lineage-21.0-legacy` @ `3fc6662` | `BoardConfig.mk:435` |
+| `hardware/sony/timekeep` | LineageOS `lineage-21` @ `11c1535` | `TimeKeep`, `timekeep` |
+
+**Empat modul TIDAK bisa diselesaikan lewat manifest** — hulu memang mencabutnya di A14.
+Semuanya butir Fase 4 (device tree), dan sudah dicatat di komentar `A37-21.xml`:
+
+| Modul | Sebab |
+|---|---|
+| `vendor.lineage.trust@1.0-service` | Trust HAL legacy dicabut di 21; meghs juga membuangnya di `lineage-21` |
+| `android.hardware.wifi@1.0-service` | Wi-Fi HAL pindah ke AIDL di A14 |
+| `android.hardware.drm@1.4-service.clearkey` | clearkey pindah ke AIDL; sekelas perubahan @1.3→@1.4 di proyek 20 |
+| `com.android.tethering.inprocess` | varian APEX berubah nama di A14 |
+
+Catatan: error `FMRadio` → `libfmjni` yang sempat muncul **bukan masalah nyata** — ia hanya
+timbul saat memakai target `aosp_arm64`. Gerbangnya (`BoardConfigSoong.mk:147`) menambahkan
+`packages/apps/FMRadio/jni/fmr` ke `PRODUCT_SOONG_NAMESPACES` hanya untuk target LineageOS,
+dan `BOARD_HAVE_QCOM_FM := true` sudah ada di BoardConfig kita.
+
 **Kesimpulan urutan:** Fase 1 **tidak bisa diverifikasi tanpa Fase 2 lebih dulu.** Rencana
 ini menaruh kamera di depan karena risikonya paling tak berbatas — itu tetap benar sebagai
 prioritas *analisis*, tapi **verifikasi kompilasinya menuntut manifest yang lengkap**.
