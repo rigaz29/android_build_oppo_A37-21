@@ -1,0 +1,15 @@
+repo: frameworks/av
+basis: LineageOS/android_frameworks_av lineage-21.0 @ d3075fbfd3
+sumber-patch: LineageOS-UL/android_frameworks_av lineage-20.0 (device1/, api1/CameraClient)
+tanggal: 2026-08-08
+status: TERSTAGING, BELUM terverifikasi kompilasi
+
+Isi 0001: 4 berkas salin (2.772 baris) + entri Android.bp.
+
+BELUM termasuk adaptasi yang masih harus ditulis (PLAN.md sec.2.2):
+  - DeviceInfo1 di common/CameraProviderManager.{h,cpp}          ~130 baris
+  - HidlDeviceInfo1 + cabang di common/hidl/HidlProviderInfo.*   ~60 baris (TULIS BARU)
+  - startDeviceInterface di-template ulang                        ~10 baris
+    (A14 mematoknya ke V3_2::ICameraDevice; HAL1 butuh V1_0)
+  - case 1: di switch versi HIDL, CameraProviderManager.cpp:2360
+  - pengabelan `new CameraClient` di CameraService.cpp            2 titik

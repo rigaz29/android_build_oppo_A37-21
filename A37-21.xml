@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Local manifest — LineageOS 21 (Android 14, SDK 34) untuk OPPO A37 / A37f / A37fw.
+
+  Basis: LineageOS/android lineage-21.0 OFFICIAL (manifest 2ea6537, ASB 2026-06).
+  Fungsi legacy dibawa sebagai seri patch, bukan dengan mem-pin fork UL.
+
+  STATUS: draf Fase 1. Baru memuat tiga repo proyek supaya `lunch lineage_A37`
+  bisa jalan dan port kamera bisa dikompilasi. Sisanya (qcom-caf msm8916,
+  sepolicy-legacy, pin anti-hanyut) menyusul di Fase 2 — lihat PLAN.md sec.3.3.
+-->
+<manifest>
+  <remote name="gh" fetch="https://github.com/" />
+
+  <project name="rigaz29/rb_device_oppo_A37" path="device/oppo/A37"
+           remote="gh" revision="refs/heads/lineage-21" upstream="lineage-21" />
+  <project name="rigaz29/kernel_oppo_msm8939" path="kernel/oppo/msm8939"
+           remote="gh" revision="refs/heads/lineage-21" upstream="lineage-21" />
+  <project name="rigaz29/rb-vendor_oppo_A37" path="vendor/oppo"
+           remote="gh" revision="2e5c6f7ffcccbbf1430f8fa13fc530e1cae5feab"
+           upstream="lineage-18.1" />
+
+  <!-- WAJIB: BoardConfig.mk:435 melakukan
+       `include device/qcom/sepolicy-legacy/sepolicy.mk`. Repo ini tidak ada di
+       manifest LineageOS official; hanya UL yang menyediakannya. -->
+  <project name="LineageOS-UL/android_device_qcom_sepolicy" path="device/qcom/sepolicy-legacy"
+           remote="gh" revision="refs/heads/lineage-21.0-legacy"
+           upstream="lineage-21.0-legacy" groups="qcom,pdk-qcom" />
+
+</manifest>

@@ -20,7 +20,7 @@ membalik kesimpulan itu** — jalannya ada, terukur, dan sudah terbukti berjalan
 | # | Pertanyaan | Jawaban | Bukti |
 |---|---|---|---|
 | 1 | Kamera HAL1 — masih pemblokir? | **Tidak lagi.** ROM a6000 LOS 21 **mengirim** `libcameraservice.so` yang memuat `CameraHardwareInterface` dan `DeviceInfo1`. Jalur HAL1 **terbukti bisa dipulihkan dan berjalan di Android 14** | §1.1, §2 |
-| 2 | Berapa besar pekerjaan kameranya? | **Kecil dan terukur: 2 berkas, 46 KB** (`device1/CameraHardwareInterface.{cpp,h}`) + hunk `case 1:` di `CameraProviderManager.cpp` + entri `Android.bp`. Sumbernya ada: fork UL `lineage-20.0` | §2.2 |
+| 2 | Berapa besar pekerjaan kameranya? | ⚠️ **KOREKSI 8 Agustus (Fase 1):** perkiraan awal "2 berkas, 46 KB" **meremehkan ~2×**. Ukuran sebenarnya **~98 KB salin di 4 berkas + ~200 baris adaptasi di 4 berkas lain** — perkiraan awal hanya menghitung `device1/` dan melewatkan `api1/CameraClient` serta pengabelan `CameraService` | §2.2 |
 | 3 | `hal3on1` jadi dipakai? | **Tidak.** Studi kelayakan menduga itu satu-satunya jalan. ROM a6000 membuktikan sebaliknya: `camera.msm8916.so` yang dikirim adalah **QCamera2 HAL1 murni** (189 rujukan `QCamera2HardwareInterface`, **nol** QCamera3), dan VINTF-nya `@2.5::ICameraProvider/legacy/0` | §2.1 |
 | 4 | Basis: UL 21 atau official 21? | **Official** — manifest `2ea6537` (19 Mei 2026) melacak **ASB 2026-06**. UL beku 2025-04. Sama seperti keputusan migrasi di proyek 20 | §3.1 |
 | 5 | Kernel perlu kerja baru? | **Tidak wajib.** A14 tidak menambah syarat kernel keras di atas A13; `TXN_SECURITY_CTX` sudah ada di kernel kita sejak `8cc1519` | `PLAN-LOS21.md` §1 |
@@ -143,17 +143,29 @@ sebagai HAL kamera** — yang dikirim QCamera2 HAL1.
 
 ### 2.3 Rencana kerja kamera
 
-Isi port dari UL `lineage-20.0`:
+**Lingkup sebenarnya, diukur 8 Agustus 2026** (perkiraan awal dokumen ini keliru — §0 #2):
 
-```
-services/camera/libcameraservice/device1/CameraHardwareInterface.cpp   28.151 byte
-services/camera/libcameraservice/device1/CameraHardwareInterface.h     18.493 byte
-                                                              total   46.644 byte
-```
+| Komponen | Ukuran | Sifat |
+|---|---|---|
+| `device1/CameraHardwareInterface.{cpp,h}` | 46.644 byte | salin langsung |
+| `api1/CameraClient.{cpp,h}` — klien Camera1 sisi HAL1 | 51.484 byte | salin langsung |
+| `DeviceInfo1` di `common/CameraProviderManager.{h,cpp}` | ~130 baris | salin + sesuaikan |
+| `startDeviceInterface` di-template ulang | ~10 baris | **A14 mematoknya ke `V3_2::ICameraDevice`**; HAL1 butuh `V1_0` |
+| `HidlDeviceInfo1` + cabang di `initializeDeviceInfo` | ~60 baris | **tulis baru** — A14 memecah HIDL/AIDL ke `common/hidl/HidlProviderInfo.*`, struktur yang tidak ada di A13 |
+| `CameraService.cpp` — 2 titik `new CameraClient` + 8 rujukan | ~40 baris | salin + sesuaikan |
+| `Android.bp` | 2 entri | |
 
-plus, di `common/CameraProviderManager.{cpp,h}`: kelas `DeviceInfo1` dan cabang
-`case 1: initializeDeviceInfo<DeviceInfo1>(...)` yang di A14 diganti `return BAD_VALUE`;
-plus entri sumber di `libcameraservice/Android.bp`.
+**Total ± 98 KB salin + ± 200 baris adaptasi, tersebar di 8 berkas.**
+
+Yang membuat ini bukan salin-tempel: **A13 monolitik, A14 sudah dipecah.** Di UL 20 seluruh
+provider manager ada di satu `CameraProviderManager.cpp` (137 KB); di A14 jalur HIDL pindah ke
+`common/hidl/HidlProviderInfo.{cpp,h}` dengan `initializeDeviceInfo()` virtual yang selalu
+membangun `HidlDeviceInfo3`. Jadi `DeviceInfo1` harus dijahit ulang ke struktur baru itu,
+bukan disalin.
+
+Kabar baiknya, fondasinya utuh: **`hardware/interfaces/camera/device/1.0/ICameraDevice.hal`
+masih ada di LOS 21 official** (diverifikasi di tree). Yang dicabut hanya konsumen sisi
+framework, bukan antarmuka HIDL-nya.
 
 **Urutan yang dianjurkan** — kamera dikerjakan **paling awal**, bukan paling akhir seperti di
 proyek 20. Alasannya: ini satu-satunya bagian yang risikonya belum berbatas. Kalau port gagal,
@@ -275,6 +287,32 @@ mixPort deep_buffer            # primary output SUDAH deep buffer; di-revert di 
 ## 6. Urutan pengerjaan
 
 Berbeda dari proyek 20: **kamera didahulukan**, karena ia satu-satunya risiko tak berbatas.
+
+### Status Fase 1 per 8 Agustus 2026 — TERSTAGING, belum terverifikasi
+
+Sudah dikerjakan:
+- Branch `lineage-21` dibuat di `rb_device_oppo_A37` (dari `15f7975`) dan
+  `kernel_oppo_msm8939` (dari `8cc1519`).
+- `A37-21.xml` draf: 3 repo proyek + `device/qcom/sepolicy-legacy` dari UL
+  `lineage-21.0-legacy` (wajib — `BoardConfig.mk:435` meng-include-nya).
+- 4 berkas kamera disalin ke `frameworks/av` branch `lineage-21-a37` +
+  entri `Android.bp`. Diekspor ke `patches/frameworks_av/0001-*.patch`
+  (2.772 baris).
+
+**BELUM dikerjakan** — adaptasi ~200 baris di §2.2 (DeviceInfo1,
+HidlDeviceInfo1, template `startDeviceInterface`, `case 1:`, pengabelan
+`CameraService`). Tanpa itu berkas yang disalin belum terhubung ke apa pun.
+
+**Dua hambatan tree yang ditemukan saat mencoba build** — keduanya bukan
+soal kamera, tapi harus diselesaikan sebelum Fase 1 bisa diverifikasi:
+
+| Hambatan | Sifat |
+|---|---|
+| `packages/apps/FMRadio` butuh `libfmjni` yang reponya belum ada di manifest | Fase 2 — tambahkan repo penyedianya atau keluarkan FMRadio |
+| `libshim_camera`/`libcamera_shim`/`libril_shim` melanggar aturan linking vendor↔platform A14 (`native:vendor` tidak boleh menaut `native:platform`) | **Fase 4, dan ini temuan penting** — shim A37 harus diperbaiki untuk A14 |
+
+Keduanya disingkirkan **sementara** di tree lokal untuk mengisolasi verifikasi
+kamera; **belum ada perbaikan sebenarnya** dan tidak di-commit ke device tree.
 
 ```
 Fase 0  Persiapan        ── disk, branch kerja lineage-21, envsetup
