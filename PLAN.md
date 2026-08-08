@@ -360,6 +360,44 @@ timbul saat memakai target `aosp_arm64`. Gerbangnya (`BoardConfigSoong.mk:147`) 
 `packages/apps/FMRadio/jni/fmr` ke `PRODUCT_SOONG_NAMESPACES` hanya untuk target LineageOS,
 dan `BOARD_HAVE_QCOM_FM := true` sudah ada di BoardConfig kita.
 
+#### Hasil Fase 2: `enforce-product-packages-exist` LOLOS
+
+Perjalanannya, terukur dari tiga build berturut:
+
+| | modul hilang |
+|---|---|
+| manifest draf 3 project | **27** |
+| + 5 repo (qcom-caf ×3, sepolicy-legacy, timekeep) | **11** |
+| + guard `hardware/qcom-caf/msm8916/Android.mk` | **0** ✅ |
+
+**Guard-nya ternyata penentu.** `os_pickup.mk` bergerbang pada `PRODUCT_SOONG_NAMESPACES`;
+tanpa berkas `Android.mk` di `hardware/qcom-caf/msm8916/`, `first-makefiles-under` tidak
+pernah dipanggil sehingga `libOmxCore`, `libmm-omxcore`, `libstagefrighthw`, dan seluruh
+modul audio/display/media msm8916 dilaporkan "tidak ada" **padahal reponya sudah tersync**.
+Sama seperti proyek 20, guard ini dipasang oleh skrip, bukan lewat manifest —
+`tools/apply-a37-patches.sh`.
+
+Catatan: `PRODUCT_SOONG_NAMESPACES` LOS 21 **sudah** memuat `hardware/qcom-caf/msm8916`
+otomatis (diverifikasi dari keluaran `lunch`), jadi yang kurang memang hanya guard-nya.
+`libfmjni` juga aman — LOS 21 menyediakannya lewat `vendor/qcom/opensource/libfmjni`.
+
+#### Yang tersisa setelah Fase 2 — semuanya Fase 4 (device tree)
+
+```
+device/oppo/A37/libshims/Android.mk: error:
+  "libshim_camera (native:vendor) can not link against libsensor  (native:platform)"
+  "libshim_camera (native:vendor) can not link against libandroid (native:platform)"
+  "libshim_camera (native:vendor) can not link against libstagefright (native:platform)"
+  "libshim_camera (native:vendor) can not link against libmedia   (native:platform)"
+  "libcamera_shim (native:vendor) can not link against libgui.vendor (native:vndk_private)"
+```
+
+Android 14 memperketat pemisahan vendor↔platform. Shim A37 harus diperbaiki — dan ini
+menyentuh **kamera dan RIL** sekaligus (`libshim_camera`, `libcamera_shim`, `libril_shim`).
+
+Plus empat modul yang hulu cabut di A14 (tabel di atas), dan **RenderEngine GLES** yang
+belum di-port dari UL 21 — `tools/apply-a37-patches.sh --check` sudah menandainya.
+
 **Kesimpulan urutan:** Fase 1 **tidak bisa diverifikasi tanpa Fase 2 lebih dulu.** Rencana
 ini menaruh kamera di depan karena risikonya paling tak berbatas — itu tetap benar sebagai
 prioritas *analisis*, tapi **verifikasi kompilasinya menuntut manifest yang lengkap**.
