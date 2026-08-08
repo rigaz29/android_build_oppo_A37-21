@@ -1,0 +1,10 @@
+    189 QCamera2HardwareInterface
+      9 QCamera2HardwareInterfaceD
+      8 QCamera2Factory
+      5 QCamera2HardwareInterfaceE
+      3 QCamera2FactoryD
+      2 QCamera2HardwareInterfaceC
+      2 QCamera2FactoryE
+      2 QCamera2FactoryC
+      1 QCamera2HWI
+android.hardware.camera.provider@2.5-service

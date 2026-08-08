@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Artefak besar yang TIDAK di-commit. Cara membuatnya ulang ada di
+# PLAN.md Lampiran A.
+# ---------------------------------------------------------------------------
+
+# ROM jangkar bukti (609 MB) + hasil bedah mentahnya.
+#
+# ⚠️ Berkas ini TIDAK punya URL publik yang tercatat — ia disediakan langsung
+# oleh pemilik proyek. Kalau hilang, hasil bedahnya di ref/evidence/ TIDAK bisa
+# dibuat ulang tanpa mendapatkan ROM-nya lagi dari acroreiser/komunitas a6010.
+# Simpan salinannya di luar repo ini.
+ref/*.zip
+ref/*.img
+ref/*.dat
+ref/*.dat.br
+ref/boot_out/
+ref/sm/
+ref/sysmnt/
+ref/META-INF/
+ref/system.transfer.list
+
+# Klon repo pihak ketiga untuk analisis (punya .git sendiri).
+# Daftar repo + branch-nya ada di PLAN.md §1.
+research/
+
+# Log sync & build
+work/*.log
+work/
+
+# Umum
+*.pyc
+__pycache__/
+*.log
+
+# State lokal harness, bukan isi proyek
+.claude/
+.qwen/
+.aider*

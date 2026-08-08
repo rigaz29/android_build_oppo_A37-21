@@ -1,0 +1,27 @@
+####################################
+# from generate-common-build-props
+# These properties identify this partition image.
+####################################
+ro.product.vendor.brand=Lenovo
+ro.product.vendor.device=a6000
+ro.product.vendor.manufacturer=Lenovo
+ro.product.vendor.model=A6000
+ro.product.vendor.name=lineage_a6000
+ro.vendor.product.cpu.abilist=armeabi-v7a,armeabi
+ro.vendor.product.cpu.abilist32=armeabi-v7a,armeabi
+ro.vendor.product.cpu.abilist64=
+ro.vendor.build.date=Sat May 11 21:49:52 MSK 2024
+ro.vendor.build.date.utc=1715453392
+ro.vendor.build.fingerprint=Lenovo/Kraft-A6000/Kraft-A6000:5.0.2/LRX22G/Kraft-A6000_S061_160727:user/release-keys
+ro.vendor.build.id=AP1A.240405.002.A1
+ro.vendor.build.tags=release-keys
+ro.vendor.build.type=user
+ro.vendor.build.version.incremental=eng.acrore.20240511.215250
+ro.vendor.build.version.release=14
+ro.vendor.build.version.release_or_codename=14
+ro.vendor.build.version.sdk=34
+####################################
+# from out/target/product/a6000/obj/ETC/android_info_prop_intermediates/android_info.prop
+####################################
+# end of file
+
