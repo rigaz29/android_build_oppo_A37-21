@@ -1,0 +1,32 @@
+From abb92254a108f00c8be00c2ce3e59520ff50fe18 Mon Sep 17 00:00:00 2001
+From: Yaroslav Zviezda <acroreiser@gmail.com>
+Date: Sat, 6 Apr 2024 20:43:00 +0300
+Subject: [PATCH 9/9] [UL] renderengine, gles: convert to c_str
+
+Change-Id: Iace08d147c8d31972f5e431f934322d3d878f223
+---
+ libs/renderengine/gl/ProgramCache.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/libs/renderengine/gl/ProgramCache.cpp b/libs/renderengine/gl/ProgramCache.cpp
+index 96ccf5c512..de22862885 100644
+--- a/libs/renderengine/gl/ProgramCache.cpp
++++ b/libs/renderengine/gl/ProgramCache.cpp
+@@ -62,7 +62,7 @@ public:
+         return out;
+     }
+     friend inline Formatter& operator<<(Formatter& out, const String8& in) {
+-        return operator<<(out, in.string());
++        return operator<<(out, in.c_str());
+     }
+     friend inline Formatter& operator<<(Formatter& to, FormaterManipFunc func) {
+         return (*func)(to);
+@@ -769,7 +769,7 @@ std::unique_ptr<Program> ProgramCache::generateProgram(const Key& needs) {
+     // fragment shader
+     String8 fs = generateFragmentShader(needs);
+ 
+-    return std::make_unique<Program>(needs, vs.string(), fs.string());
++    return std::make_unique<Program>(needs, vs.c_str(), fs.c_str());
+ }
+ 
+ void ProgramCache::useProgram(EGLContext context, const Description& description) {

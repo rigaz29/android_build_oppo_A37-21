@@ -1,0 +1,555 @@
+From 138d3478356628a5e55a3248ec4db6ea57a836cb Mon Sep 17 00:00:00 2001
+From: Yaroslav Zviezda <acroreiser@gmail.com>
+Date: Sun, 31 Mar 2024 22:14:45 +0300
+Subject: [PATCH 3/9] Revert "Delete genTextures and deleteTextures from
+ RenderEngine"
+
+This reverts commit c3a17824aed485229dba17819e5ee4e4ecf4db1e.
+
+Change-Id: Ie3f799ca1705ba326d13d670d8dae791c8e1ec85
+---
+ .../include/renderengine/LayerSettings.h      |  6 +++
+ .../include/renderengine/RenderEngine.h       |  3 ++
+ .../include/renderengine/mock/RenderEngine.h  |  4 ++
+ libs/renderengine/skia/SkiaRenderEngine.h     |  2 +
+ libs/renderengine/tests/RenderEngineTest.cpp  | 21 ++++++++
+ .../threaded/RenderEngineThreaded.cpp         | 12 +++++
+ .../threaded/RenderEngineThreaded.h           |  2 +
+ .../src/ClientCompositionRequestCache.cpp     |  3 +-
+ .../FrontEnd/LayerCreationArgs.h              |  1 +
+ .../surfaceflinger/FrontEnd/LayerSnapshot.cpp |  1 +
+ .../surfaceflinger/FrontEnd/LayerSnapshot.h   |  1 +
+ .../FrontEnd/RequestedLayerState.cpp          |  1 +
+ .../FrontEnd/RequestedLayerState.h            |  1 +
+ services/surfaceflinger/Layer.cpp             | 10 ++++
+ services/surfaceflinger/Layer.h               |  2 +
+ services/surfaceflinger/LayerFE.cpp           |  1 +
+ services/surfaceflinger/SurfaceFlinger.cpp    | 54 +++++++++++++++++++
+ services/surfaceflinger/SurfaceFlinger.h      | 14 +++++
+ .../fuzzer/surfaceflinger_fuzzer.cpp          |  3 ++
+ .../tests/unittests/CompositionTest.cpp       | 15 ++++--
+ .../tests/unittests/TestableSurfaceFlinger.h  |  1 +
+ 21 files changed, 152 insertions(+), 6 deletions(-)
+
+diff --git a/libs/renderengine/include/renderengine/LayerSettings.h b/libs/renderengine/include/renderengine/LayerSettings.h
+index 8ac0af47c6..944e3c900d 100644
+--- a/libs/renderengine/include/renderengine/LayerSettings.h
++++ b/libs/renderengine/include/renderengine/LayerSettings.h
+@@ -47,6 +47,10 @@ struct Buffer {
+     // Fence that will fire when the buffer is ready to be bound.
+     sp<Fence> fence = nullptr;
+ 
++    // Texture identifier to bind the external texture to.
++    // TODO(alecmouri): This is GL-specific...make the type backend-agnostic.
++    uint32_t textureName = 0;
++
+     // Whether to use filtering when rendering the texture.
+     bool useTextureFiltering = false;
+ 
+@@ -149,6 +153,7 @@ struct LayerSettings {
+ // compositionengine/impl/ClientCompositionRequestCache.cpp
+ static inline bool operator==(const Buffer& lhs, const Buffer& rhs) {
+     return lhs.buffer == rhs.buffer && lhs.fence == rhs.fence &&
++            lhs.textureName == rhs.textureName &&
+             lhs.useTextureFiltering == rhs.useTextureFiltering &&
+             lhs.textureTransform == rhs.textureTransform &&
+             lhs.usePremultipliedAlpha == rhs.usePremultipliedAlpha &&
+@@ -192,6 +197,7 @@ static inline void PrintTo(const Buffer& settings, ::std::ostream* os) {
+         << (settings.buffer.get() ? decodePixelFormat(settings.buffer->getPixelFormat()).c_str()
+                                   : "");
+     *os << "\n    .fence = " << settings.fence.get();
++    *os << "\n    .textureName = " << settings.textureName;
+     *os << "\n    .useTextureFiltering = " << settings.useTextureFiltering;
+     *os << "\n    .textureTransform = ";
+     PrintMatrix(settings.textureTransform, os);
+diff --git a/libs/renderengine/include/renderengine/RenderEngine.h b/libs/renderengine/include/renderengine/RenderEngine.h
+index 77f41ec800..c32445cbd7 100644
+--- a/libs/renderengine/include/renderengine/RenderEngine.h
++++ b/libs/renderengine/include/renderengine/RenderEngine.h
+@@ -114,6 +114,9 @@ public:
+     // dump the extension strings. always call the base class.
+     virtual void dump(std::string& result) = 0;
+ 
++    virtual void genTextures(size_t count, uint32_t* names) = 0;
++    virtual void deleteTextures(size_t count, uint32_t const* names) = 0;
++
+     // queries that are required to be thread safe
+     virtual size_t getMaxTextureSize() const = 0;
+     virtual size_t getMaxViewportDims() const = 0;
+diff --git a/libs/renderengine/include/renderengine/mock/RenderEngine.h b/libs/renderengine/include/renderengine/mock/RenderEngine.h
+index a58a65ca9f..857df1e536 100644
+--- a/libs/renderengine/include/renderengine/mock/RenderEngine.h
++++ b/libs/renderengine/include/renderengine/mock/RenderEngine.h
+@@ -35,6 +35,9 @@ public:
+ 
+     MOCK_METHOD1(primeCache, std::future<void>(bool));
+     MOCK_METHOD1(dump, void(std::string&));
++    MOCK_METHOD2(genTextures, void(size_t, uint32_t*));
++    MOCK_METHOD2(deleteTextures, void(size_t, uint32_t const*));
++    MOCK_METHOD1(drawMesh, void(const renderengine::Mesh&));
+     MOCK_CONST_METHOD0(getMaxTextureSize, size_t());
+     MOCK_CONST_METHOD0(getMaxViewportDims, size_t());
+     MOCK_CONST_METHOD0(isProtected, bool());
+@@ -50,6 +53,7 @@ public:
+                  void(const std::shared_ptr<std::promise<FenceResult>>&&, const DisplaySettings&,
+                       const std::vector<LayerSettings>&, const std::shared_ptr<ExternalTexture>&,
+                       base::unique_fd&&));
++    MOCK_METHOD0(cleanFramebufferCache, void());
+     MOCK_METHOD0(getContextPriority, int());
+     MOCK_METHOD0(supportsBackgroundBlur, bool());
+     MOCK_METHOD1(onActiveDisplaySizeChanged, void(ui::Size));
+diff --git a/libs/renderengine/skia/SkiaRenderEngine.h b/libs/renderengine/skia/SkiaRenderEngine.h
+index ac134afa64..3a123fd3c6 100644
+--- a/libs/renderengine/skia/SkiaRenderEngine.h
++++ b/libs/renderengine/skia/SkiaRenderEngine.h
+@@ -70,6 +70,8 @@ public:
+     void onActiveDisplaySizeChanged(ui::Size size) override final;
+     int reportShadersCompiled();
+ 
++    virtual void genTextures(size_t /*count*/, uint32_t* /*names*/) override final{};
++    virtual void deleteTextures(size_t /*count*/, uint32_t const* /*names*/) override final{};
+     virtual void setEnableTracing(bool tracingEnabled) override final;
+ 
+     void useProtectedContext(bool useProtectedContext) override;
+diff --git a/libs/renderengine/tests/RenderEngineTest.cpp b/libs/renderengine/tests/RenderEngineTest.cpp
+index 2fd2a35927..a838644eeb 100644
+--- a/libs/renderengine/tests/RenderEngineTest.cpp
++++ b/libs/renderengine/tests/RenderEngineTest.cpp
+@@ -231,6 +231,9 @@ public:
+         if (WRITE_BUFFER_TO_FILE_ON_FAILURE && ::testing::Test::HasFailure()) {
+             writeBufferToFile("/data/texture_out_");
+         }
++        for (uint32_t texName : mTexNames) {
++            mRE->deleteTextures(1, &texName);
++        }
+         const ::testing::TestInfo* const test_info =
+                 ::testing::UnitTest::GetInstance()->current_test_info();
+         ALOGD("**** Tearing down after %s.%s\n", test_info->test_case_name(), test_info->name());
+@@ -570,6 +573,8 @@ public:
+ 
+     std::unique_ptr<renderengine::RenderEngine> mRE;
+     std::shared_ptr<renderengine::ExternalTexture> mBuffer;
++
++    std::vector<uint32_t> mTexNames;
+ };
+ 
+ void RenderEngineTest::initializeRenderEngine() {
+@@ -613,6 +618,9 @@ struct BufferSourceVariant {
+     static void fillColor(renderengine::LayerSettings& layer, half r, half g, half b,
+                           RenderEngineTest* fixture) {
+         const auto buf = fixture->allocateSourceBuffer(1, 1);
++        uint32_t texName;
++        fixture->mRE->genTextures(1, &texName);
++        fixture->mTexNames.push_back(texName);
+ 
+         uint8_t* pixels;
+         buf->getBuffer()->lock(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
+@@ -632,6 +640,7 @@ struct BufferSourceVariant {
+         buf->getBuffer()->unlock();
+ 
+         layer.source.buffer.buffer = buf;
++        layer.source.buffer.textureName = texName;
+         layer.sourceDataspace = ui::Dataspace::V0_SRGB_LINEAR;
+         OpaquenessVariant::setOpaqueBit(layer);
+     }
+@@ -1180,6 +1189,9 @@ void RenderEngineTest::fillRedBufferTextureTransform() {
+     // Here will allocate a checker board texture, but transform texture
+     // coordinates so that only the upper left is applied.
+     const auto buf = allocateSourceBuffer(2, 2);
++    uint32_t texName;
++    RenderEngineTest::mRE->genTextures(1, &texName);
++    this->mTexNames.push_back(texName);
+ 
+     uint8_t* pixels;
+     buf->getBuffer()->lock(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
+@@ -1200,6 +1212,7 @@ void RenderEngineTest::fillRedBufferTextureTransform() {
+     buf->getBuffer()->unlock();
+ 
+     layer.source.buffer.buffer = buf;
++    layer.source.buffer.textureName = texName;
+     // Transform coordinates to only be inside the red quadrant.
+     layer.source.buffer.textureTransform = mat4::scale(vec4(0.2f, 0.2f, 1.f, 1.f));
+     layer.alpha = 1.0f;
+@@ -1225,6 +1238,9 @@ void RenderEngineTest::fillRedBufferWithPremultiplyAlpha() {
+ 
+     renderengine::LayerSettings layer;
+     const auto buf = allocateSourceBuffer(1, 1);
++    uint32_t texName;
++    RenderEngineTest::mRE->genTextures(1, &texName);
++    this->mTexNames.push_back(texName);
+ 
+     uint8_t* pixels;
+     buf->getBuffer()->lock(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
+@@ -1236,6 +1252,7 @@ void RenderEngineTest::fillRedBufferWithPremultiplyAlpha() {
+     buf->getBuffer()->unlock();
+ 
+     layer.source.buffer.buffer = buf;
++    layer.source.buffer.textureName = texName;
+     layer.source.buffer.usePremultipliedAlpha = true;
+     layer.alpha = 0.5f;
+     layer.geometry.boundaries = Rect(1, 1).toFloatRect();
+@@ -1260,6 +1277,9 @@ void RenderEngineTest::fillRedBufferWithoutPremultiplyAlpha() {
+ 
+     renderengine::LayerSettings layer;
+     const auto buf = allocateSourceBuffer(1, 1);
++    uint32_t texName;
++    RenderEngineTest::mRE->genTextures(1, &texName);
++    this->mTexNames.push_back(texName);
+ 
+     uint8_t* pixels;
+     buf->getBuffer()->lock(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
+@@ -1271,6 +1291,7 @@ void RenderEngineTest::fillRedBufferWithoutPremultiplyAlpha() {
+     buf->getBuffer()->unlock();
+ 
+     layer.source.buffer.buffer = buf;
++    layer.source.buffer.textureName = texName;
+     layer.source.buffer.usePremultipliedAlpha = false;
+     layer.alpha = 0.5f;
+     layer.geometry.boundaries = Rect(1, 1).toFloatRect();
+diff --git a/libs/renderengine/threaded/RenderEngineThreaded.cpp b/libs/renderengine/threaded/RenderEngineThreaded.cpp
+index f58f543854..31e9832d3c 100644
+--- a/libs/renderengine/threaded/RenderEngineThreaded.cpp
++++ b/libs/renderengine/threaded/RenderEngineThreaded.cpp
+@@ -176,6 +176,18 @@ void RenderEngineThreaded::dump(std::string& result) {
+     result.assign(resultFuture.get());
+ }
+ 
++void RenderEngineThreaded::genTextures(size_t count, uint32_t* names) {
++    ATRACE_CALL();
++    // This is a no-op in SkiaRenderEngine.
++    return;
++}
++
++void RenderEngineThreaded::deleteTextures(size_t count, uint32_t const* names) {
++    ATRACE_CALL();
++    // This is a no-op in SkiaRenderEngine.
++    return;
++}
++
+ void RenderEngineThreaded::mapExternalTextureBuffer(const sp<GraphicBuffer>& buffer,
+                                                     bool isRenderable) {
+     ATRACE_CALL();
+diff --git a/libs/renderengine/threaded/RenderEngineThreaded.h b/libs/renderengine/threaded/RenderEngineThreaded.h
+index 3f1e67f285..459c8159fa 100644
+--- a/libs/renderengine/threaded/RenderEngineThreaded.h
++++ b/libs/renderengine/threaded/RenderEngineThreaded.h
+@@ -46,6 +46,8 @@ public:
+ 
+     void dump(std::string& result) override;
+ 
++    void genTextures(size_t count, uint32_t* names) override;
++    void deleteTextures(size_t count, uint32_t const* names) override;
+     size_t getMaxTextureSize() const override;
+     size_t getMaxViewportDims() const override;
+ 
+diff --git a/services/surfaceflinger/CompositionEngine/src/ClientCompositionRequestCache.cpp b/services/surfaceflinger/CompositionEngine/src/ClientCompositionRequestCache.cpp
+index bdaa1d0ae1..752257b810 100644
+--- a/services/surfaceflinger/CompositionEngine/src/ClientCompositionRequestCache.cpp
++++ b/services/surfaceflinger/CompositionEngine/src/ClientCompositionRequestCache.cpp
+@@ -41,7 +41,8 @@ inline bool equalIgnoringSource(const renderengine::LayerSettings& lhs,
+ }
+ 
+ inline bool equalIgnoringBuffer(const renderengine::Buffer& lhs, const renderengine::Buffer& rhs) {
+-    return lhs.useTextureFiltering == rhs.useTextureFiltering &&
++    return lhs.textureName == rhs.textureName &&
++            lhs.useTextureFiltering == rhs.useTextureFiltering &&
+             lhs.textureTransform == rhs.textureTransform &&
+             lhs.usePremultipliedAlpha == rhs.usePremultipliedAlpha &&
+             lhs.isOpaque == rhs.isOpaque && lhs.maxLuminanceNits == rhs.maxLuminanceNits;
+diff --git a/services/surfaceflinger/FrontEnd/LayerCreationArgs.h b/services/surfaceflinger/FrontEnd/LayerCreationArgs.h
+index 0788d1abce..c26edb5d22 100644
+--- a/services/surfaceflinger/FrontEnd/LayerCreationArgs.h
++++ b/services/surfaceflinger/FrontEnd/LayerCreationArgs.h
+@@ -54,6 +54,7 @@ struct LayerCreationArgs {
+     gui::LayerMetadata metadata;
+     pid_t ownerPid;
+     uid_t ownerUid;
++    uint32_t textureName;
+     uint32_t sequence;
+     bool addToRoot = true;
+     wp<IBinder> parentHandle = nullptr;
+diff --git a/services/surfaceflinger/FrontEnd/LayerSnapshot.cpp b/services/surfaceflinger/FrontEnd/LayerSnapshot.cpp
+index ea06cf6de6..90b8b5316d 100644
+--- a/services/surfaceflinger/FrontEnd/LayerSnapshot.cpp
++++ b/services/surfaceflinger/FrontEnd/LayerSnapshot.cpp
+@@ -118,6 +118,7 @@ LayerSnapshot::LayerSnapshot(const RequestedLayerState& state,
+     sequence = static_cast<int32_t>(state.id);
+     name = state.name;
+     debugName = state.debugName;
++    textureName = state.textureName;
+     premultipliedAlpha = state.premultipliedAlpha;
+     inputInfo.name = state.name;
+     inputInfo.id = static_cast<int32_t>(uniqueSequence);
+diff --git a/services/surfaceflinger/FrontEnd/LayerSnapshot.h b/services/surfaceflinger/FrontEnd/LayerSnapshot.h
+index 73ee22fa21..4b9de38b7e 100644
+--- a/services/surfaceflinger/FrontEnd/LayerSnapshot.h
++++ b/services/surfaceflinger/FrontEnd/LayerSnapshot.h
+@@ -64,6 +64,7 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
+     int32_t sequence;
+     std::string name;
+     std::string debugName;
++    uint32_t textureName;
+     bool contentOpaque;
+     bool layerOpaqueFlagSet;
+     RoundedCornerState roundedCorner;
+diff --git a/services/surfaceflinger/FrontEnd/RequestedLayerState.cpp b/services/surfaceflinger/FrontEnd/RequestedLayerState.cpp
+index cb0e2a1938..1981494d2f 100644
+--- a/services/surfaceflinger/FrontEnd/RequestedLayerState.cpp
++++ b/services/surfaceflinger/FrontEnd/RequestedLayerState.cpp
+@@ -53,6 +53,7 @@ RequestedLayerState::RequestedLayerState(const LayerCreationArgs& args)
+         name(args.name + "#" + std::to_string(args.sequence)),
+         canBeRoot(args.addToRoot),
+         layerCreationFlags(args.flags),
++        textureName(args.textureName),
+         ownerUid(args.ownerUid),
+         ownerPid(args.ownerPid),
+         parentId(args.parentId),
+diff --git a/services/surfaceflinger/FrontEnd/RequestedLayerState.h b/services/surfaceflinger/FrontEnd/RequestedLayerState.h
+index 09f33de63b..429a9ae9e6 100644
+--- a/services/surfaceflinger/FrontEnd/RequestedLayerState.h
++++ b/services/surfaceflinger/FrontEnd/RequestedLayerState.h
+@@ -96,6 +96,7 @@ struct RequestedLayerState : layer_state_t {
+     const std::string name;
+     bool canBeRoot = false;
+     const uint32_t layerCreationFlags;
++    const uint32_t textureName;
+     // The owner of the layer. If created from a non system process, it will be the calling uid.
+     // If created from a system process, the value can be passed in.
+     const gui::Uid ownerUid;
+diff --git a/services/surfaceflinger/Layer.cpp b/services/surfaceflinger/Layer.cpp
+index 736fec6fb2..ba6e558e80 100644
+--- a/services/surfaceflinger/Layer.cpp
++++ b/services/surfaceflinger/Layer.cpp
+@@ -151,6 +151,7 @@ Layer::Layer(const surfaceflinger::LayerCreationArgs& args)
+                 args.metadata.getInt32(gui::METADATA_WINDOW_TYPE, 0))),
+         mLayerCreationFlags(args.flags),
+         mBorderEnabled(false),
++        mTextureName(args.textureName),
+         mLegacyLayerFE(args.flinger->getFactory().createLayerFE(mName)) {
+     ALOGV("Creating Layer %s", getDebugName());
+ 
+@@ -217,6 +218,7 @@ Layer::Layer(const surfaceflinger::LayerCreationArgs& args)
+ 
+     mSnapshot->sequence = sequence;
+     mSnapshot->name = getDebugName();
++    mSnapshot->textureName = mTextureName;
+     mSnapshot->premultipliedAlpha = mPremultipliedAlpha;
+     mSnapshot->parentTransform = {};
+ }
+@@ -238,6 +240,13 @@ Layer::~Layer() {
+                                   mBufferInfo.mBuffer->getBuffer(), mBufferInfo.mFrameNumber,
+                                   mBufferInfo.mFence);
+     }
++    if (!isClone()) {
++        // The original layer and the clone layer share the same texture. Therefore, only one of
++        // the layers, in this case the original layer, needs to handle the deletion. The original
++        // layer and the clone should be removed at the same time so there shouldn't be any issue
++        // with the clone layer trying to use the deleted texture.
++        mFlinger->deleteTextureAsync(mTextureName);
++    }
+     const int32_t layerId = getSequence();
+     mFlinger->mTimeStats->onDestroy(layerId);
+     mFlinger->mFrameTracer->onDestroy(layerId);
+@@ -3740,6 +3749,7 @@ Rect Layer::computeBufferCrop(const State& s) {
+ sp<Layer> Layer::createClone(uint32_t mirrorRootId) {
+     surfaceflinger::LayerCreationArgs args(mFlinger.get(), nullptr, mName + " (Mirror)", 0,
+                                            LayerMetadata());
++    args.textureName = mTextureName;
+     sp<Layer> layer = mFlinger->getFactory().createBufferStateLayer(args);
+     layer->setInitialValuesForClone(sp<Layer>::fromExisting(this), mirrorRootId);
+     return layer;
+diff --git a/services/surfaceflinger/Layer.h b/services/surfaceflinger/Layer.h
+index 0b1e3cfc54..1de258537b 100644
+--- a/services/surfaceflinger/Layer.h
++++ b/services/surfaceflinger/Layer.h
+@@ -1246,6 +1246,8 @@ private:
+     void releasePreviousBuffer();
+     void resetDrawingStateBufferInfo();
+ 
++    const uint32_t mTextureName;
++
+     // Transform hint provided to the producer. This must be accessed holding
+     // the mStateLock.
+     ui::Transform::RotationFlags mTransformHintLegacy = ui::Transform::ROT_0;
+diff --git a/services/surfaceflinger/LayerFE.cpp b/services/surfaceflinger/LayerFE.cpp
+index 2dbcb841ac..115e9973cc 100644
+--- a/services/surfaceflinger/LayerFE.cpp
++++ b/services/surfaceflinger/LayerFE.cpp
+@@ -229,6 +229,7 @@ void LayerFE::prepareBufferStateClientComposition(
+     layerSettings.source.buffer.buffer = mSnapshot->externalTexture;
+     layerSettings.source.buffer.isOpaque = mSnapshot->contentOpaque;
+     layerSettings.source.buffer.fence = mSnapshot->acquireFence;
++    layerSettings.source.buffer.textureName = mSnapshot->textureName;
+     layerSettings.source.buffer.usePremultipliedAlpha = mSnapshot->premultipliedAlpha;
+     bool hasSmpte2086 = mSnapshot->hdrMetadata.validTypes & HdrMetadata::SMPTE2086;
+     bool hasCta861_3 = mSnapshot->hdrMetadata.validTypes & HdrMetadata::CTA861_3;
+diff --git a/services/surfaceflinger/SurfaceFlinger.cpp b/services/surfaceflinger/SurfaceFlinger.cpp
+index 7aa9429f03..beb2877707 100644
+--- a/services/surfaceflinger/SurfaceFlinger.cpp
++++ b/services/surfaceflinger/SurfaceFlinger.cpp
+@@ -802,6 +802,42 @@ void SurfaceFlinger::bootFinished() {
+     }));
+ }
+ 
++uint32_t SurfaceFlinger::getNewTexture() {
++    {
++        std::lock_guard lock(mTexturePoolMutex);
++        if (!mTexturePool.empty()) {
++            uint32_t name = mTexturePool.back();
++            mTexturePool.pop_back();
++            ATRACE_INT("TexturePoolSize", mTexturePool.size());
++            return name;
++        }
++
++        // The pool was too small, so increase it for the future
++        ++mTexturePoolSize;
++    }
++
++    // The pool was empty, so we need to get a new texture name directly using a
++    // blocking call to the main thread
++    auto genTextures = [this] {
++               uint32_t name = 0;
++               getRenderEngine().genTextures(1, &name);
++               return name;
++    };
++    if (std::this_thread::get_id() == mMainThreadId) {
++        return genTextures();
++    } else {
++        return mScheduler->schedule(genTextures).get();
++    }
++}
++
++void SurfaceFlinger::deleteTextureAsync(uint32_t texture) {
++    std::lock_guard lock(mTexturePoolMutex);
++    // We don't change the pool size, so the fix-up logic in postComposition will decide whether
++    // to actually delete this or not based on mTexturePoolSize
++    mTexturePool.push_back(texture);
++    ATRACE_INT("TexturePoolSize", mTexturePool.size());
++}
++
+ static std::optional<renderengine::RenderEngine::RenderEngineType>
+ chooseRenderEngineTypeViaSysProp() {
+     char prop[PROPERTY_VALUE_MAX];
+@@ -3202,6 +3238,23 @@ void SurfaceFlinger::onCompositionPresented(PhysicalDisplayId pacesetterId,
+     // Cleanup any outstanding resources due to rendering a prior frame.
+     getRenderEngine().cleanupPostRender();
+ 
++    {
++        std::lock_guard lock(mTexturePoolMutex);
++        if (mTexturePool.size() < mTexturePoolSize) {
++            const size_t refillCount = mTexturePoolSize - mTexturePool.size();
++            const size_t offset = mTexturePool.size();
++            mTexturePool.resize(mTexturePoolSize);
++            getRenderEngine().genTextures(refillCount, mTexturePool.data() + offset);
++            ATRACE_INT("TexturePoolSize", mTexturePool.size());
++        } else if (mTexturePool.size() > mTexturePoolSize) {
++            const size_t deleteCount = mTexturePool.size() - mTexturePoolSize;
++            const size_t offset = mTexturePoolSize;
++            getRenderEngine().deleteTextures(deleteCount, mTexturePool.data() + offset);
++            mTexturePool.resize(mTexturePoolSize);
++            ATRACE_INT("TexturePoolSize", mTexturePool.size());
++        }
++    }
++
+     if (mNumTrustedPresentationListeners > 0) {
+         // We avoid any reverse traversal upwards so this shouldn't be too expensive
+         traverseLegacyLayers([&](Layer* layer) {
+@@ -5979,6 +6032,7 @@ status_t SurfaceFlinger::createLayer(LayerCreationArgs& args, gui::CreateSurface
+ 
+ status_t SurfaceFlinger::createBufferStateLayer(LayerCreationArgs& args, sp<IBinder>* handle,
+                                                 sp<Layer>* outLayer) {
++    args.textureName = getNewTexture();
+     *outLayer = getFactory().createBufferStateLayer(args);
+     *handle = (*outLayer)->getHandle();
+     return NO_ERROR;
+diff --git a/services/surfaceflinger/SurfaceFlinger.h b/services/surfaceflinger/SurfaceFlinger.h
+index 2ae772f077..dfece32dde 100644
+--- a/services/surfaceflinger/SurfaceFlinger.h
++++ b/services/surfaceflinger/SurfaceFlinger.h
+@@ -281,6 +281,13 @@ public:
+     // The CompositionEngine encapsulates all composition related interfaces and actions.
+     compositionengine::CompositionEngine& getCompositionEngine() const;
+ 
++    // Obtains a name from the texture pool, or, if the pool is empty, posts a
++    // synchronous message to the main thread to obtain one on the fly
++    uint32_t getNewTexture();
++
++    // utility function to delete a texture on the main thread
++    void deleteTextureAsync(uint32_t texture);
++
+     renderengine::RenderEngine& getRenderEngine() const;
+ 
+     void onLayerFirstRef(Layer*);
+@@ -1316,6 +1323,13 @@ private:
+ 
+     TransactionCallbackInvoker mTransactionCallbackInvoker;
+ 
++    // We maintain a pool of pre-generated texture names to hand out to avoid
++    // layer creation needing to run on the main thread (which it would
++    // otherwise need to do to access RenderEngine).
++    std::mutex mTexturePoolMutex;
++    uint32_t mTexturePoolSize = 0;
++    std::vector<uint32_t> mTexturePool;
++
+     std::atomic<size_t> mNumLayers = 0;
+ 
+     // to linkToDeath
+diff --git a/services/surfaceflinger/fuzzer/surfaceflinger_fuzzer.cpp b/services/surfaceflinger/fuzzer/surfaceflinger_fuzzer.cpp
+index d13189e439..d95aa383db 100644
+--- a/services/surfaceflinger/fuzzer/surfaceflinger_fuzzer.cpp
++++ b/services/surfaceflinger/fuzzer/surfaceflinger_fuzzer.cpp
+@@ -145,6 +145,9 @@ void SurfaceFlingerFuzzer::invokeFlinger() {
+     mFlinger->scheduleRepaint();
+     mFlinger->scheduleSample();
+ 
++    uint32_t texture = mFlinger->getNewTexture();
++    mFlinger->deleteTextureAsync(texture);
++
+     sp<IBinder> handle = defaultServiceManager()->checkService(
+             String16(mFdp.ConsumeRandomLengthString().c_str()));
+     LayerHandle::getLayer(handle);
+diff --git a/services/surfaceflinger/tests/unittests/CompositionTest.cpp b/services/surfaceflinger/tests/unittests/CompositionTest.cpp
+index 7d8a30a727..082d0b087f 100644
+--- a/services/surfaceflinger/tests/unittests/CompositionTest.cpp
++++ b/services/surfaceflinger/tests/unittests/CompositionTest.cpp
+@@ -590,6 +590,7 @@ struct BaseLayerProperties {
+                     const renderengine::LayerSettings layer = layerSettings.back();
+                     EXPECT_THAT(layer.source.buffer.buffer, Not(IsNull()));
+                     EXPECT_THAT(layer.source.buffer.fence, Not(IsNull()));
++                    EXPECT_EQ(DEFAULT_TEXTURE_ID, layer.source.buffer.textureName);
+                     EXPECT_EQ(true, layer.source.buffer.usePremultipliedAlpha);
+                     EXPECT_EQ(false, layer.source.buffer.isOpaque);
+                     EXPECT_EQ(0.0, layer.geometry.roundedCornersRadius.x);
+@@ -867,11 +868,15 @@ struct BufferLayerVariant : public BaseLayerVariant<LayerProperties> {
+     using FlingerLayerType = sp<Layer>;
+ 
+     static FlingerLayerType createLayer(CompositionTest* test) {
+-        FlingerLayerType layer = Base::template createLayerWithFactory<Layer>(test, [test]() {
+-            LayerCreationArgs args(test->mFlinger.flinger(), sp<Client>(), "test-layer",
+-                                   LayerProperties::LAYER_FLAGS, LayerMetadata());
+-            return sp<Layer>::make(args);
+-        });
++        test->mFlinger.mutableTexturePool().push_back(DEFAULT_TEXTURE_ID);
++
++        FlingerLayerType layer =
++                Base::template createLayerWithFactory<Layer>(test, [test]() {
++                    LayerCreationArgs args(test->mFlinger.flinger(), sp<Client>(), "test-layer",
++                                           LayerProperties::LAYER_FLAGS, LayerMetadata());
++                    args.textureName = test->mFlinger.mutableTexturePool().back();
++                    return sp<Layer>::make(args);
++                });
+ 
+         LayerProperties::setupLayerState(test, layer);
+ 
+diff --git a/services/surfaceflinger/tests/unittests/TestableSurfaceFlinger.h b/services/surfaceflinger/tests/unittests/TestableSurfaceFlinger.h
+index b3d2e289ce..44d2265805 100644
+--- a/services/surfaceflinger/tests/unittests/TestableSurfaceFlinger.h
++++ b/services/surfaceflinger/tests/unittests/TestableSurfaceFlinger.h
+@@ -646,6 +646,7 @@ public:
+     auto& mutableVisibleRegionsDirty() { return mFlinger->mVisibleRegionsDirty; }
+     auto& mutableMainThreadId() { return mFlinger->mMainThreadId; }
+     auto& mutablePendingHotplugEvents() { return mFlinger->mPendingHotplugEvents; }
++    auto& mutableTexturePool() { return mFlinger->mTexturePool; }
+     auto& mutableTransactionFlags() { return mFlinger->mTransactionFlags; }
+     auto& mutableDebugDisableHWC() { return mFlinger->mDebugDisableHWC; }
+     auto& mutableMaxRenderTargetSize() { return mFlinger->mMaxRenderTargetSize; }

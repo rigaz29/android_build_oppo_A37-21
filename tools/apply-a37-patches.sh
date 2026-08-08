@@ -40,7 +40,37 @@ else
     else git -C frameworks/av am --abort >/dev/null 2>&1; no "kamera: git am GAGAL -- selesaikan manual"; rc=1; fi
 fi
 
-# --- 3. penjaga regresi ----------------------------------------------------
+# --- 3. seri patch frameworks/native (RenderEngine GLES) -------------------
+# 9 commit dari LineageOS-UL/android_frameworks_native lineage-21.0,
+# f8ba66e97fc7^..e9f7d5b89491. Android 14 mencabut backend GLES non-Skia; tanpa
+# seri ini debug.renderengine.backend=gles (device.mk:129) tidak dikenali dan
+# SurfaceFlinger jatuh ke SkiaGL -> bug 10.B di Adreno 306.
+#
+# Bahwa perangkat ini BENAR-BENAR memakai GLESRenderEngine bukan dugaan:
+# `dumpsys SurfaceFlinger` pada ROM proyek 20 yang terpasang mencetak
+# "RenderEngine program cache size for unprotected context" dan
+# "RenderEngine framebuffer image cache size" — string yang hanya ada di
+# gl/GLESRenderEngine.cpp:1584/1601 dan NIHIL di seluruh skia/.
+#
+# Patch 0002 (Revert "Delete (most) sf fuzzers") ikut serta bukan karena kita
+# butuh fuzzer, melainkan karena 0003 dan 0004 menyunting berkas-berkas itu.
+# Fuzzer tidak ada di PRODUCT_PACKAGES, jadi tidak ikut terbangun.
+#
+# 0004 di-resolve manual: official punya mNeedsPostRenderCleanup yang tidak
+# dikenal UL, sementara revert mengembalikan useFramebufferCache. Keduanya
+# dipertahankan — resolusinya sudah ikut terbawa di berkas patch ini.
+P=/root/a37-21/patches/frameworks_native
+if [ ! -d frameworks/native ]; then no "frameworks/native tidak ada"; rc=1
+elif git -C frameworks/native log --oneline -1 --grep="renderengine, gles: convert to c_str" | grep -q .; then
+    ok "renderengine: seri GLES sudah terpasang"
+elif [ "$CHECK" = 1 ]; then do_ "renderengine: PERLU terapkan seri $P (9 patch)"
+else
+    do_ "renderengine: terapkan seri $P"
+    if git -C frameworks/native am "$P"/*.patch >/dev/null 2>&1; then ok "renderengine: seri terpasang"
+    else git -C frameworks/native am --abort >/dev/null 2>&1; no "renderengine: git am GAGAL -- selesaikan manual"; rc=1; fi
+fi
+
+# --- 4. penjaga regresi ----------------------------------------------------
 echo; echo "-- penjaga regresi --"
 c(){ if [ -e "$1" ]; then ok "$2"; else no "$2 -- HILANG"; rc=1; fi; }
 c frameworks/native/libs/renderengine/gl \

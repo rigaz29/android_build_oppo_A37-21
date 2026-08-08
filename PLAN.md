@@ -422,6 +422,85 @@ yang benar-benar menolak, bukan preventif.
 
 ---
 
+### Fase 4 — device tree (8 Agustus 2026): `m nothing` LOLOS
+
+Kriteria selesai fase ini: `m nothing` dengan `lunch lineage_A37-ap2a-userdebug` selesai
+`rc=0` — nol pelanggaran link-type, nol modul hilang. **Tercapai.**
+
+> Catatan combo lunch: Android 14 mewajibkan bentuk tiga bagian.
+> `lineage_A37-userdebug` ditolak ("Valid combos must be of the form
+> `<product>-<release>-<variant>`"). Release yang tersedia di tree ini: **`ap2a`**.
+
+**4.1 Shim — 5 error link-type.** `libshim_camera` dan `libcamera_shim` bertanda
+`LOCAL_VENDOR_MODULE := true`, sedangkan `binary.mk:1328` hanya mengizinkan modul vendor
+menaut `native:vendor|vndk|platform_vndk`. Solusinya: **kedua modul dipindah ke partisi
+system** (flag itu dibuang). `libril_shim` sengaja tidak disentuh — ia tidak punya
+`LOCAL_SHARED_LIBRARIES` sehingga lolos apa adanya, dan RIL subsistem yang sudah terbukti.
+
+Ini bukan menyiasati pemeriksaan, melainkan mengakui bahwa aturannya memodelkan perangkat
+Treble/VNDK dan A37 bukan itu. Buktinya diambil dari ROM proyek 20 yang **terpasang dan
+boot**, bukan dari dokumentasi:
+
+```
+/linkerconfig/ld.config.txt   namespace.default.isolated     = false
+                              namespace.default.search.paths = /system/${LIB} … /vendor/${LIB}
+llvm-readelf -d /system/vendor/lib/libshim_camera.so
+                              DT_NEEDED libsensor/libandroid/libstagefright/libmedia
+adb shell ls                  kelima pustaka itu HANYA ada di /system/lib
+```
+
+Satu namespace non-isolated yang mencakup keduanya, dan lintas-direktori memang sudah
+berjalan hari ini. Blob tetap menemukan shim-nya karena `TARGET_LD_SHIM_LIBS` bukan injeksi
+DT_NEEDED saat build melainkan cppflag ke linker; `bionic/linker/linker.cpp:1368` memuatnya
+**by name ke namespace yang sama** dengan blob.
+
+**4.2 `QCOM_BOARD_PLATFORMS += msm8916`** (`BoardConfig.mk`). msm8916 sudah dicabut dari
+`hardware/qcom-caf/common/qcom_boards.mk` (tidak ada di lineage-20.0 maupun 21.0), sehingga
+gerbang `is-board-platform-in-list` di `media/Android.mk:5` false dan `mm-core/` +
+`libstagefrighthw/` tidak pernah di-include. Di proyek 20 ini tak terlihat karena media
+di-pin ke `lineage-19.0-caf-msm8916` yang belum bergerbang. Radiusnya diukur: variabel itu
+dipakai di **satu** titik gerbang saja di seluruh repo yang kita build. Efek sampingnya
+positif — `libbt-vendor` ikut pulih lewat `is-vendor-board-platform,QCOM`.
+
+**4.3 Empat modul yang hulu cabut di A14.** Prediksi Fase 2 terbukti tepat semua:
+
+| Lama (A13) | Baru (A14) | Dasar |
+|---|---|---|
+| `android.hardware.drm@1.4-service.clearkey` | `android.hardware.drm-service.clearkey` | `frameworks/av/drm/mediadrm/plugins/clearkey/aidl/Android.bp:77`; HIDL clearkey nihil di `hardware/interfaces/drm/` |
+| `android.hardware.wifi@1.0-service` | `android.hardware.wifi-service` | `hardware/interfaces/wifi/` tak punya `1.*/default` lagi; layanan AIDL memakai `libwifi-hal` yang sama |
+| `vendor.lineage.trust@1.0-service` | *(dibuang)* | `hardware/lineage/interfaces/` tak lagi punya `trust/` |
+| `com.android.tethering.inprocess` | *(dibuang, berikut `InProcessNetworkStack`)* | varian in-process dicabut total: nihil di seluruh pohon, `Tethering/apex/Android.bp` tak punya `override_apex`, dan `go_defaults_common.mk` A14 tak menyebutnya |
+
+`manifest.xml` ikut disesuaikan: `<fqname>@1.4::…/clearkey</fqname>` dan instance `clearkey`
+dibuang karena layanan AIDL membawa VINTF fragment sendiri (`format="aidl"`, jadi tidak
+bentrok dengan blok `hidl`). Menyisakannya melanggar aturan 10.C.
+
+**4.4 RenderEngine GLES — 9 patch, bukan 3.** Seri
+`f8ba66e97fc7^..e9f7d5b89491` dari UL `lineage-21.0`, tersimpan di
+`patches/frameworks_native/` (14.464 baris). Daftar awal yang hanya menyebut 3 commit
+keliru — itu hasil filter path `libs/renderengine/gl` saja; seri penuhnya ikut membalik
+beberapa perubahan AOSP lain (fuzzer, `genTextures`, `useFramebufferCache`, HDR priming).
+Satu konflik di `RenderEngineThreaded.cpp` di-resolve manual (official punya
+`mNeedsPostRenderCleanup`, revert mengembalikan `useFramebufferCache` — keduanya dipertahankan).
+
+Premisnya diverifikasi ulang di perangkat, bukan diwarisi dari dokumen: ROM proyek 20
+memang menjalankan GLESRenderEngine non-Skia —
+
+```
+getprop debug.renderengine.backend            gles
+dumpsys SurfaceFlinger | grep RenderEngine    "program cache size for unprotected context"
+                                              "framebuffer image cache size"
+```
+
+Kedua string itu hanya ada di `gl/GLESRenderEngine.cpp:1584/1601` dan **nihil di seluruh
+`skia/`**. Setelah patch, `SurfaceFlinger.cpp:846` kembali mengenali nilai `gles` yang
+sudah disetel `device.mk:129`.
+
+**Belum diverifikasi:** kompilasi `librenderengine`/`surfaceflinger`, dan seluruh perilaku
+runtime (tethering, Wi-Fi AIDL, clearkey) — itu Fase 8.
+
+---
+
 ## 7. Risiko yang diakui
 
 | Risiko | Dampak | Mitigasi |

@@ -3,10 +3,16 @@
 Rencana porting **LineageOS 21 (Android 14, SDK 34)** untuk **OPPO A37 / A37f / A37fw** —
 Qualcomm MSM8916 (Snapdragon 410), kernel 3.10.108 arm64, 2 GB RAM, Adreno 306.
 
-> ## Status: **Rencana.** Belum ada fase yang dikerjakan.
+> ## Status: Fase 1 (terstaging), **2 dan 4 selesai**
 >
 > Tree LineageOS 21 official sudah tersedia dan terverifikasi: **1430 project, 0 HEAD kosong,
 > 169 GB**, manifest `2ea6537` melacak **ASB 2026-06**.
+>
+> **`m nothing` lolos `rc=0`** dengan `lunch lineage_A37-ap2a-userdebug` — nol pelanggaran
+> link-type, nol modul hilang. Rinciannya di [`PLAN.md`](PLAN.md) §Fase 4.
+>
+> Sisa Fase 1: ± 200 baris adaptasi kamera (`DeviceInfo1`, `HidlDeviceInfo1`, `case 1:` di
+> switch HIDL, wiring `CameraService`) sampai `m libcameraservice` rc=0.
 >
 > Pendahulunya: [`android_build_oppo_A37-20`](https://github.com/rigaz29/android_build_oppo_A37-20)
 > — LineageOS 20, **ROM terpasang dan dipakai di perangkat**: boot, Wi-Fi, Bluetooth, dan
@@ -29,9 +35,14 @@ official 21 punya libcameraservice/device1/       : TIDAK ADA
 | **RenderEngine GLES** — tanpa ini Adreno 306 dipaksa Skia dan SurfaceFlinger crash (bug 10.B) | ❌ | ✅ | **UL 21** |
 | **Camera HAL1 `device1/`** — kamera A37 hanya jalan lewat HAL1 | ❌ | ❌ | **UL 20**, forward-port |
 
-Port kameranya **kecil dan terukur: 2 berkas, 46 KB** —
-`device1/CameraHardwareInterface.{cpp,h}` — plus hunk `case 1:` di `CameraProviderManager.cpp`
-dan entri `Android.bp`.
+Kamera: **4 berkas, ± 98 KB** (`device1/CameraHardwareInterface.{cpp,h}` **dan**
+`api1/CameraClient.{cpp,h}`) plus ± 200 baris adaptasi — entri `Android.bp`, `case 1:` di
+`CameraProviderManager.cpp`, serta `DeviceInfo1`/`HidlDeviceInfo1` dan wiring `CameraService`.
+
+RenderEngine GLES: **9 patch, 14.464 baris**, di [`patches/frameworks_native/`](patches/frameworks_native/).
+Bahwa perangkat ini benar-benar memakai GLESRenderEngine dibuktikan dari ROM proyek 20 yang
+berjalan — `dumpsys SurfaceFlinger` mencetak string yang hanya ada di `gl/GLESRenderEngine.cpp`
+dan nihil di seluruh `skia/`.
 
 ---
 

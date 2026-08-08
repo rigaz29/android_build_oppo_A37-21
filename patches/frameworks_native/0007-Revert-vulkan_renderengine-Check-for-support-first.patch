@@ -1,0 +1,110 @@
+From 66b3cf7062dadd00af67e296cccc746e85f2bcb1 Mon Sep 17 00:00:00 2001
+From: TARKZiM <tom8476oo@gmail.com>
+Date: Tue, 17 Sep 2024 18:53:37 +0800
+Subject: [PATCH 7/9] Revert "vulkan_renderengine: Check for support first"
+
+This reverts commit f3369eda0af91df158d66f1e4d906a0f0b1496e7.
+---
+ .../include/renderengine/RenderEngine.h       |  2 --
+ libs/renderengine/skia/SkiaVkRenderEngine.cpp | 27 ++++++-------------
+ libs/renderengine/skia/SkiaVkRenderEngine.h   |  2 ++
+ libs/renderengine/tests/RenderEngineTest.cpp  |  4 +++
+ 4 files changed, 14 insertions(+), 21 deletions(-)
+
+diff --git a/libs/renderengine/include/renderengine/RenderEngine.h b/libs/renderengine/include/renderengine/RenderEngine.h
+index 46bdaf0f5c..83af252740 100644
+--- a/libs/renderengine/include/renderengine/RenderEngine.h
++++ b/libs/renderengine/include/renderengine/RenderEngine.h
+@@ -105,8 +105,6 @@ public:
+ 
+     static std::unique_ptr<RenderEngine> create(const RenderEngineCreationArgs& args);
+ 
+-    static bool canSupport(GraphicsApi);
+-
+     virtual ~RenderEngine() = 0;
+ 
+     // ----- BEGIN DEPRECATED INTERFACE -----
+diff --git a/libs/renderengine/skia/SkiaVkRenderEngine.cpp b/libs/renderengine/skia/SkiaVkRenderEngine.cpp
+index 33b61586c2..30d2d04f57 100644
+--- a/libs/renderengine/skia/SkiaVkRenderEngine.cpp
++++ b/libs/renderengine/skia/SkiaVkRenderEngine.cpp
+@@ -287,7 +287,6 @@ static GrVkGetProc sGetProc = [](const char* proc_name, VkInstance instance, VkD
+     CHECK_NONNULL(vk##F)
+ 
+ VulkanInterface initVulkanInterface(bool protectedContent = false) {
+-    const nsecs_t timeBefore = systemTime();
+     VulkanInterface interface;
+ 
+     VK_GET_PROC(EnumerateInstanceVersion);
+@@ -604,9 +603,7 @@ VulkanInterface initVulkanInterface(bool protectedContent = false) {
+     interface.isProtected = protectedContent;
+     // funcs already initialized
+ 
+-    const nsecs_t timeAfter = systemTime();
+-    const float initTimeMs = static_cast<float>(timeAfter - timeBefore) / 1.0E6;
+-    ALOGD("%s: Success init Vulkan interface in %f ms", __func__, initTimeMs);
++    ALOGD("%s: Success init Vulkan interface", __func__);
+     return interface;
+ }
+ 
+@@ -662,25 +659,17 @@ static void sSetupVulkanInterface() {
+     }
+ }
+ 
+-bool RenderEngine::canSupport(GraphicsApi graphicsApi) {
+-    switch (graphicsApi) {
+-        case GraphicsApi::GL:
+-            return true;
+-        case GraphicsApi::VK: {
+-            if (!sVulkanInterface.initialized) {
+-                sVulkanInterface = initVulkanInterface(false /* no protected content */);
+-                ALOGD("%s: initialized == %s.", __func__,
+-                      sVulkanInterface.initialized ? "true" : "false");
+-            }
+-            return sVulkanInterface.initialized;
+-        }
+-    }
+-}
+-
+ namespace skia {
+ 
+ using base::StringAppendF;
+ 
++bool SkiaVkRenderEngine::canSupportSkiaVkRenderEngine() {
++    VulkanInterface temp = initVulkanInterface(false /* no protected content */);
++    ALOGD("SkiaVkRenderEngine::canSupportSkiaVkRenderEngine(): initialized == %s.",
++          temp.initialized ? "true" : "false");
++    return temp.initialized;
++}
++
+ std::unique_ptr<SkiaVkRenderEngine> SkiaVkRenderEngine::create(
+         const RenderEngineCreationArgs& args) {
+     std::unique_ptr<SkiaVkRenderEngine> engine(new SkiaVkRenderEngine(args));
+diff --git a/libs/renderengine/skia/SkiaVkRenderEngine.h b/libs/renderengine/skia/SkiaVkRenderEngine.h
+index 52bc500a5a..2e0cf45220 100644
+--- a/libs/renderengine/skia/SkiaVkRenderEngine.h
++++ b/libs/renderengine/skia/SkiaVkRenderEngine.h
+@@ -27,6 +27,8 @@ namespace skia {
+ 
+ class SkiaVkRenderEngine : public SkiaRenderEngine {
+ public:
++    // Returns false if Vulkan implementation can't support SkiaVkRenderEngine.
++    static bool canSupportSkiaVkRenderEngine();
+     static std::unique_ptr<SkiaVkRenderEngine> create(const RenderEngineCreationArgs& args);
+     ~SkiaVkRenderEngine() override;
+ 
+diff --git a/libs/renderengine/tests/RenderEngineTest.cpp b/libs/renderengine/tests/RenderEngineTest.cpp
+index 05c411f4cd..19fb0aa1a7 100644
+--- a/libs/renderengine/tests/RenderEngineTest.cpp
++++ b/libs/renderengine/tests/RenderEngineTest.cpp
+@@ -134,6 +134,10 @@ public:
+     bool typeSupported() override {
+         return skia::SkiaVkRenderEngine::canSupportSkiaVkRenderEngine();
+     }
++
++    bool apiSupported() override {
++        return skia::SkiaVkRenderEngine::canSupportSkiaVkRenderEngine();
++    }
+ };
+ 
+ class SkiaGLESRenderEngineFactory : public RenderEngineFactory {
