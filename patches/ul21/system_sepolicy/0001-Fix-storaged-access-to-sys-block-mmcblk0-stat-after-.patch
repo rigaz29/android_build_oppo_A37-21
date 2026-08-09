@@ -1,0 +1,494 @@
+From 0b88afe77fb3e4a698b368d0ff9d75f4c599e776 Mon Sep 17 00:00:00 2001
+From: Vladimir Oltean <olteanv@gmail.com>
+Date: Tue, 25 Sep 2018 23:09:09 +0300
+Subject: [PATCH 1/4] Fix storaged access to /sys/block/mmcblk0/stat after
+ 48027a00
+
+* Commit "storaged: remove access to sysfs_type" denied the storaged
+  daemon access to the sysfs node it needed to do its work.
+* It also didn't provide any means necessary for adding the necessary
+  rules at a device level, since its sepolicy is private.
+* Here we define a new sysfs_disk_stat security label, which device
+  maintainers are supposed to add to their genfs_contexts file. This is
+  similar to how hal_health_default and sysfs_batteryinfo is handled.
+* What prevents the genfs_contexts from being added here directly is
+  that in a typical vendor implementation, these sysfs files are
+  actually symlinks and not a single, unified path SELinux-wise.
+
+Change-Id: I13ca09cf2458b22ffb6c70b8a353e891e810c606
+Signed-off-by: Vladimir Oltean <olteanv@gmail.com>
+(cherry picked from commit 2814cfc532d48f6224d6115ecb1e9fbd7b5ce96e)
+---
+ prebuilts/api/29.0/private/storaged.te                 | 5 +++++
+ prebuilts/api/29.0/public/file.te                      | 1 +
+ prebuilts/api/30.0/private/compat/29.0/29.0.ignore.cil | 1 +
+ prebuilts/api/30.0/private/storaged.te                 | 5 +++++
+ prebuilts/api/30.0/public/file.te                      | 1 +
+ prebuilts/api/31.0/private/compat/29.0/29.0.ignore.cil | 1 +
+ prebuilts/api/31.0/private/compat/30.0/30.0.ignore.cil | 1 +
+ prebuilts/api/31.0/private/storaged.te                 | 5 +++++
+ prebuilts/api/31.0/public/file.te                      | 1 +
+ prebuilts/api/32.0/private/compat/29.0/29.0.ignore.cil | 1 +
+ prebuilts/api/32.0/private/compat/30.0/30.0.ignore.cil | 1 +
+ prebuilts/api/32.0/private/compat/31.0/31.0.ignore.cil | 1 +
+ prebuilts/api/32.0/private/storaged.te                 | 5 +++++
+ prebuilts/api/32.0/public/file.te                      | 1 +
+ prebuilts/api/33.0/private/compat/29.0/29.0.ignore.cil | 1 +
+ prebuilts/api/33.0/private/compat/30.0/30.0.ignore.cil | 1 +
+ prebuilts/api/33.0/private/compat/31.0/31.0.ignore.cil | 1 +
+ prebuilts/api/33.0/private/compat/32.0/32.0.ignore.cil | 1 +
+ prebuilts/api/33.0/private/storaged.te                 | 5 +++++
+ prebuilts/api/33.0/public/file.te                      | 1 +
+ prebuilts/api/34.0/private/compat/29.0/29.0.ignore.cil | 1 +
+ prebuilts/api/34.0/private/compat/30.0/30.0.ignore.cil | 1 +
+ prebuilts/api/34.0/private/compat/31.0/31.0.ignore.cil | 1 +
+ prebuilts/api/34.0/private/compat/32.0/32.0.ignore.cil | 1 +
+ prebuilts/api/34.0/private/compat/33.0/33.0.ignore.cil | 1 +
+ prebuilts/api/34.0/private/storaged.te                 | 5 +++++
+ prebuilts/api/34.0/public/file.te                      | 1 +
+ private/compat/29.0/29.0.ignore.cil                    | 1 +
+ private/compat/30.0/30.0.ignore.cil                    | 1 +
+ private/compat/31.0/31.0.ignore.cil                    | 1 +
+ private/compat/32.0/32.0.ignore.cil                    | 1 +
+ private/compat/33.0/33.0.ignore.cil                    | 1 +
+ private/storaged.te                                    | 5 +++++
+ public/file.te                                         | 1 +
+ 34 files changed, 62 insertions(+)
+
+diff --git a/prebuilts/api/29.0/private/storaged.te b/prebuilts/api/29.0/private/storaged.te
+index 3ed24b233..a1351d938 100644
+--- a/prebuilts/api/29.0/private/storaged.te
++++ b/prebuilts/api/29.0/private/storaged.te
+@@ -7,6 +7,11 @@ init_daemon_domain(storaged)
+ # Read access to pseudo filesystems
+ r_dir_file(storaged, domain)
+ 
++# Allow read access to /sys/block/mmcblk0/stat or /sys/block/sda/stat.
++# Implementations typically have symlinks to vendor specific files.
++# Vendors should mark sysfs_disk_stat on all files read by storaged.
++r_dir_file(storaged, sysfs_disk_stat)
++
+ # Read /proc/uid_io/stats
+ allow storaged proc_uid_io_stats:file r_file_perms;
+ 
+diff --git a/prebuilts/api/29.0/public/file.te b/prebuilts/api/29.0/public/file.te
+index da990e306..e0aad876d 100644
+--- a/prebuilts/api/29.0/public/file.te
++++ b/prebuilts/api/29.0/public/file.te
+@@ -11,6 +11,7 @@ type proc_overcommit_memory, fs_type, proc_type;
+ type proc_min_free_order_shift, fs_type, proc_type;
+ # proc, sysfs, or other nodes that permit configuration of kernel usermodehelpers.
+ type usermodehelper, fs_type, proc_type;
++type sysfs_disk_stat, fs_type, sysfs_type;
+ type sysfs_usermodehelper, fs_type, sysfs_type;
+ type proc_qtaguid_ctrl, fs_type, mlstrustedobject, proc_type;
+ type proc_qtaguid_stat, fs_type, mlstrustedobject, proc_type;
+diff --git a/prebuilts/api/30.0/private/compat/29.0/29.0.ignore.cil b/prebuilts/api/30.0/private/compat/29.0/29.0.ignore.cil
+index fdea691ea..cfdf55e27 100644
+--- a/prebuilts/api/30.0/private/compat/29.0/29.0.ignore.cil
++++ b/prebuilts/api/30.0/private/compat/29.0/29.0.ignore.cil
+@@ -100,6 +100,7 @@
+     staged_install_file
+     storage_config_prop
+     surfaceflinger_display_prop
++    sysfs_disk_stat
+     sysfs_dm_verity
+     system_adbd_prop
+     system_config_service
+diff --git a/prebuilts/api/30.0/private/storaged.te b/prebuilts/api/30.0/private/storaged.te
+index b7d4ae9ce..68fa04293 100644
+--- a/prebuilts/api/30.0/private/storaged.te
++++ b/prebuilts/api/30.0/private/storaged.te
+@@ -7,6 +7,11 @@ init_daemon_domain(storaged)
+ # Read access to pseudo filesystems
+ r_dir_file(storaged, domain)
+ 
++# Allow read access to /sys/block/mmcblk0/stat or /sys/block/sda/stat.
++# Implementations typically have symlinks to vendor specific files.
++# Vendors should mark sysfs_disk_stat on all files read by storaged.
++r_dir_file(storaged, sysfs_disk_stat)
++
+ # Read /proc/uid_io/stats
+ allow storaged proc_uid_io_stats:file r_file_perms;
+ 
+diff --git a/prebuilts/api/30.0/public/file.te b/prebuilts/api/30.0/public/file.te
+index 91257e237..06c972bdc 100644
+--- a/prebuilts/api/30.0/public/file.te
++++ b/prebuilts/api/30.0/public/file.te
+@@ -15,6 +15,7 @@ type proc_min_free_order_shift, fs_type, proc_type;
+ type proc_kpageflags, fs_type, proc_type;
+ # proc, sysfs, or other nodes that permit configuration of kernel usermodehelpers.
+ type usermodehelper, fs_type, proc_type;
++type sysfs_disk_stat, fs_type, sysfs_type;
+ type sysfs_usermodehelper, fs_type, sysfs_type;
+ type proc_qtaguid_ctrl, fs_type, mlstrustedobject, proc_type;
+ type proc_qtaguid_stat, fs_type, mlstrustedobject, proc_type;
+diff --git a/prebuilts/api/31.0/private/compat/29.0/29.0.ignore.cil b/prebuilts/api/31.0/private/compat/29.0/29.0.ignore.cil
+index 10790468f..9c3a1d5bd 100644
+--- a/prebuilts/api/31.0/private/compat/29.0/29.0.ignore.cil
++++ b/prebuilts/api/31.0/private/compat/29.0/29.0.ignore.cil
+@@ -100,6 +100,7 @@
+     staged_install_file
+     storage_config_prop
+     surfaceflinger_display_prop
++    sysfs_disk_stat
+     sysfs_dm_verity
+     system_adbd_prop
+     system_config_service
+diff --git a/prebuilts/api/31.0/private/compat/30.0/30.0.ignore.cil b/prebuilts/api/31.0/private/compat/30.0/30.0.ignore.cil
+index 0c36aed13..8a579b18e 100644
+--- a/prebuilts/api/31.0/private/compat/30.0/30.0.ignore.cil
++++ b/prebuilts/api/31.0/private/compat/30.0/30.0.ignore.cil
+@@ -128,6 +128,7 @@
+     sysfs_devfreq_cur
+     sysfs_devfreq_dir
+     sysfs_devices_cs_etm
++    sysfs_disk_stat
+     sysfs_dma_heap
+     sysfs_dmabuf_stats
+     sysfs_uhid
+diff --git a/prebuilts/api/31.0/private/storaged.te b/prebuilts/api/31.0/private/storaged.te
+index bb39e5b73..8b6beed36 100644
+--- a/prebuilts/api/31.0/private/storaged.te
++++ b/prebuilts/api/31.0/private/storaged.te
+@@ -7,6 +7,11 @@ init_daemon_domain(storaged)
+ # Read access to pseudo filesystems
+ r_dir_file(storaged, domain)
+ 
++# Allow read access to /sys/block/mmcblk0/stat or /sys/block/sda/stat.
++# Implementations typically have symlinks to vendor specific files.
++# Vendors should mark sysfs_disk_stat on all files read by storaged.
++r_dir_file(storaged, sysfs_disk_stat)
++
+ # Read /proc/uid_io/stats
+ allow storaged proc_uid_io_stats:file r_file_perms;
+ 
+diff --git a/prebuilts/api/31.0/public/file.te b/prebuilts/api/31.0/public/file.te
+index dc788ac6a..578df89b6 100644
+--- a/prebuilts/api/31.0/public/file.te
++++ b/prebuilts/api/31.0/public/file.te
+@@ -15,6 +15,7 @@ type proc_min_free_order_shift, fs_type, proc_type;
+ type proc_kpageflags, fs_type, proc_type;
+ # proc, sysfs, or other nodes that permit configuration of kernel usermodehelpers.
+ type usermodehelper, fs_type, proc_type;
++type sysfs_disk_stat, fs_type, sysfs_type;
+ type sysfs_usermodehelper, fs_type, sysfs_type;
+ type proc_qtaguid_ctrl, fs_type, mlstrustedobject, proc_type;
+ type proc_qtaguid_stat, fs_type, mlstrustedobject, proc_type;
+diff --git a/prebuilts/api/32.0/private/compat/29.0/29.0.ignore.cil b/prebuilts/api/32.0/private/compat/29.0/29.0.ignore.cil
+index 10790468f..9c3a1d5bd 100644
+--- a/prebuilts/api/32.0/private/compat/29.0/29.0.ignore.cil
++++ b/prebuilts/api/32.0/private/compat/29.0/29.0.ignore.cil
+@@ -100,6 +100,7 @@
+     staged_install_file
+     storage_config_prop
+     surfaceflinger_display_prop
++    sysfs_disk_stat
+     sysfs_dm_verity
+     system_adbd_prop
+     system_config_service
+diff --git a/prebuilts/api/32.0/private/compat/30.0/30.0.ignore.cil b/prebuilts/api/32.0/private/compat/30.0/30.0.ignore.cil
+index e4acfe8a4..a9c670ef8 100644
+--- a/prebuilts/api/32.0/private/compat/30.0/30.0.ignore.cil
++++ b/prebuilts/api/32.0/private/compat/30.0/30.0.ignore.cil
+@@ -129,6 +129,7 @@
+     sysfs_devfreq_cur
+     sysfs_devfreq_dir
+     sysfs_devices_cs_etm
++    sysfs_disk_stat
+     sysfs_dma_heap
+     sysfs_dmabuf_stats
+     sysfs_uhid
+diff --git a/prebuilts/api/32.0/private/compat/31.0/31.0.ignore.cil b/prebuilts/api/32.0/private/compat/31.0/31.0.ignore.cil
+index 4e95cc6e4..30ab5ad15 100644
+--- a/prebuilts/api/32.0/private/compat/31.0/31.0.ignore.cil
++++ b/prebuilts/api/32.0/private/compat/31.0/31.0.ignore.cil
+@@ -6,4 +6,5 @@
+ (typeattributeset new_objects
+   ( new_objects
+     hypervisor_prop
++    sysfs_disk_stat
+   ))
+diff --git a/prebuilts/api/32.0/private/storaged.te b/prebuilts/api/32.0/private/storaged.te
+index bb39e5b73..8b6beed36 100644
+--- a/prebuilts/api/32.0/private/storaged.te
++++ b/prebuilts/api/32.0/private/storaged.te
+@@ -7,6 +7,11 @@ init_daemon_domain(storaged)
+ # Read access to pseudo filesystems
+ r_dir_file(storaged, domain)
+ 
++# Allow read access to /sys/block/mmcblk0/stat or /sys/block/sda/stat.
++# Implementations typically have symlinks to vendor specific files.
++# Vendors should mark sysfs_disk_stat on all files read by storaged.
++r_dir_file(storaged, sysfs_disk_stat)
++
+ # Read /proc/uid_io/stats
+ allow storaged proc_uid_io_stats:file r_file_perms;
+ 
+diff --git a/prebuilts/api/32.0/public/file.te b/prebuilts/api/32.0/public/file.te
+index dc788ac6a..578df89b6 100644
+--- a/prebuilts/api/32.0/public/file.te
++++ b/prebuilts/api/32.0/public/file.te
+@@ -15,6 +15,7 @@ type proc_min_free_order_shift, fs_type, proc_type;
+ type proc_kpageflags, fs_type, proc_type;
+ # proc, sysfs, or other nodes that permit configuration of kernel usermodehelpers.
+ type usermodehelper, fs_type, proc_type;
++type sysfs_disk_stat, fs_type, sysfs_type;
+ type sysfs_usermodehelper, fs_type, sysfs_type;
+ type proc_qtaguid_ctrl, fs_type, mlstrustedobject, proc_type;
+ type proc_qtaguid_stat, fs_type, mlstrustedobject, proc_type;
+diff --git a/prebuilts/api/33.0/private/compat/29.0/29.0.ignore.cil b/prebuilts/api/33.0/private/compat/29.0/29.0.ignore.cil
+index 10790468f..9c3a1d5bd 100644
+--- a/prebuilts/api/33.0/private/compat/29.0/29.0.ignore.cil
++++ b/prebuilts/api/33.0/private/compat/29.0/29.0.ignore.cil
+@@ -100,6 +100,7 @@
+     staged_install_file
+     storage_config_prop
+     surfaceflinger_display_prop
++    sysfs_disk_stat
+     sysfs_dm_verity
+     system_adbd_prop
+     system_config_service
+diff --git a/prebuilts/api/33.0/private/compat/30.0/30.0.ignore.cil b/prebuilts/api/33.0/private/compat/30.0/30.0.ignore.cil
+index ba0a4946a..482f5a88e 100644
+--- a/prebuilts/api/33.0/private/compat/30.0/30.0.ignore.cil
++++ b/prebuilts/api/33.0/private/compat/30.0/30.0.ignore.cil
+@@ -131,6 +131,7 @@
+     sysfs_devfreq_cur
+     sysfs_devfreq_dir
+     sysfs_devices_cs_etm
++    sysfs_disk_stat
+     sysfs_dma_heap
+     sysfs_dmabuf_stats
+     sysfs_uhid
+diff --git a/prebuilts/api/33.0/private/compat/31.0/31.0.ignore.cil b/prebuilts/api/33.0/private/compat/31.0/31.0.ignore.cil
+index 496832edf..4e770346a 100644
+--- a/prebuilts/api/33.0/private/compat/31.0/31.0.ignore.cil
++++ b/prebuilts/api/33.0/private/compat/31.0/31.0.ignore.cil
+@@ -43,6 +43,7 @@
+     untrusted_app_30
+     proc_vendor_sched
+     sdk_sandbox_service
++    sysfs_disk_stat
+     sysfs_fs_fuse_bpf
+     sysfs_vendor_sched
+     tv_iapp_service
+diff --git a/prebuilts/api/33.0/private/compat/32.0/32.0.ignore.cil b/prebuilts/api/33.0/private/compat/32.0/32.0.ignore.cil
+index d2d247bd1..48f683625 100644
+--- a/prebuilts/api/33.0/private/compat/32.0/32.0.ignore.cil
++++ b/prebuilts/api/33.0/private/compat/32.0/32.0.ignore.cil
+@@ -70,6 +70,7 @@
+     selection_toolbar_service
+     smart_idle_maint_enabled_prop
+     snapuserd_proxy_socket
++    sysfs_disk_stat
+     sysfs_fs_fuse_bpf
+     sysfs_gpu
+     sysfs_lru_gen_enabled
+diff --git a/prebuilts/api/33.0/private/storaged.te b/prebuilts/api/33.0/private/storaged.te
+index bb39e5b73..8b6beed36 100644
+--- a/prebuilts/api/33.0/private/storaged.te
++++ b/prebuilts/api/33.0/private/storaged.te
+@@ -7,6 +7,11 @@ init_daemon_domain(storaged)
+ # Read access to pseudo filesystems
+ r_dir_file(storaged, domain)
+ 
++# Allow read access to /sys/block/mmcblk0/stat or /sys/block/sda/stat.
++# Implementations typically have symlinks to vendor specific files.
++# Vendors should mark sysfs_disk_stat on all files read by storaged.
++r_dir_file(storaged, sysfs_disk_stat)
++
+ # Read /proc/uid_io/stats
+ allow storaged proc_uid_io_stats:file r_file_perms;
+ 
+diff --git a/prebuilts/api/33.0/public/file.te b/prebuilts/api/33.0/public/file.te
+index 2bfa282fa..b7617d5c0 100644
+--- a/prebuilts/api/33.0/public/file.te
++++ b/prebuilts/api/33.0/public/file.te
+@@ -17,6 +17,7 @@ type proc_kpageflags, fs_type, proc_type;
+ type proc_watermark_boost_factor, fs_type, proc_type;
+ # proc, sysfs, or other nodes that permit configuration of kernel usermodehelpers.
+ type usermodehelper, fs_type, proc_type;
++type sysfs_disk_stat, fs_type, sysfs_type;
+ type sysfs_usermodehelper, fs_type, sysfs_type;
+ type proc_qtaguid_ctrl, fs_type, mlstrustedobject, proc_type;
+ type proc_qtaguid_stat, fs_type, mlstrustedobject, proc_type;
+diff --git a/prebuilts/api/34.0/private/compat/29.0/29.0.ignore.cil b/prebuilts/api/34.0/private/compat/29.0/29.0.ignore.cil
+index e40888dcc..b20f3d25f 100644
+--- a/prebuilts/api/34.0/private/compat/29.0/29.0.ignore.cil
++++ b/prebuilts/api/34.0/private/compat/29.0/29.0.ignore.cil
+@@ -101,6 +101,7 @@
+     storage_config_prop
+     surfaceflinger_display_prop
+     sysfs_dm_verity
++    sysfs_disk_stat
+     system_adbd_prop
+     system_config_service
+     system_group_file
+diff --git a/prebuilts/api/34.0/private/compat/30.0/30.0.ignore.cil b/prebuilts/api/34.0/private/compat/30.0/30.0.ignore.cil
+index 0a3d2e9a3..e8ed9c826 100644
+--- a/prebuilts/api/34.0/private/compat/30.0/30.0.ignore.cil
++++ b/prebuilts/api/34.0/private/compat/30.0/30.0.ignore.cil
+@@ -131,6 +131,7 @@
+     sysfs_devfreq_cur
+     sysfs_devfreq_dir
+     sysfs_devices_cs_etm
++    sysfs_disk_stat
+     sysfs_dma_heap
+     sysfs_dmabuf_stats
+     sysfs_uhid
+diff --git a/prebuilts/api/34.0/private/compat/31.0/31.0.ignore.cil b/prebuilts/api/34.0/private/compat/31.0/31.0.ignore.cil
+index 0e39f3ec3..1b68c0f9c 100644
+--- a/prebuilts/api/34.0/private/compat/31.0/31.0.ignore.cil
++++ b/prebuilts/api/34.0/private/compat/31.0/31.0.ignore.cil
+@@ -42,6 +42,7 @@
+     untrusted_app_30
+     proc_vendor_sched
+     sdk_sandbox_service
++    sysfs_disk_stat
+     sysfs_fs_fuse_bpf
+     sysfs_vendor_sched
+     tv_iapp_service
+diff --git a/prebuilts/api/34.0/private/compat/32.0/32.0.ignore.cil b/prebuilts/api/34.0/private/compat/32.0/32.0.ignore.cil
+index 43ce0a1b6..c1ea25808 100644
+--- a/prebuilts/api/34.0/private/compat/32.0/32.0.ignore.cil
++++ b/prebuilts/api/34.0/private/compat/32.0/32.0.ignore.cil
+@@ -68,6 +68,7 @@
+     selection_toolbar_service
+     smart_idle_maint_enabled_prop
+     snapuserd_proxy_socket
++    sysfs_disk_stat
+     sysfs_fs_fuse_bpf
+     sysfs_gpu
+     sysfs_lru_gen_enabled
+diff --git a/prebuilts/api/34.0/private/compat/33.0/33.0.ignore.cil b/prebuilts/api/34.0/private/compat/33.0/33.0.ignore.cil
+index 3c92b45a6..710d3b32d 100644
+--- a/prebuilts/api/34.0/private/compat/33.0/33.0.ignore.cil
++++ b/prebuilts/api/34.0/private/compat/33.0/33.0.ignore.cil
+@@ -64,6 +64,7 @@
+     servicemanager_prop
+     shutdown_checkpoints_system_data_file
+     stats_config_data_file
++    sysfs_disk_stat
+     sysfs_fs_fuse_features
+     system_net_netd_service
+     timezone_metadata_prop
+diff --git a/prebuilts/api/34.0/private/storaged.te b/prebuilts/api/34.0/private/storaged.te
+index bb39e5b73..8b6beed36 100644
+--- a/prebuilts/api/34.0/private/storaged.te
++++ b/prebuilts/api/34.0/private/storaged.te
+@@ -7,6 +7,11 @@ init_daemon_domain(storaged)
+ # Read access to pseudo filesystems
+ r_dir_file(storaged, domain)
+ 
++# Allow read access to /sys/block/mmcblk0/stat or /sys/block/sda/stat.
++# Implementations typically have symlinks to vendor specific files.
++# Vendors should mark sysfs_disk_stat on all files read by storaged.
++r_dir_file(storaged, sysfs_disk_stat)
++
+ # Read /proc/uid_io/stats
+ allow storaged proc_uid_io_stats:file r_file_perms;
+ 
+diff --git a/prebuilts/api/34.0/public/file.te b/prebuilts/api/34.0/public/file.te
+index 0ce5c3436..be25bcc3d 100644
+--- a/prebuilts/api/34.0/public/file.te
++++ b/prebuilts/api/34.0/public/file.te
+@@ -17,6 +17,7 @@ type proc_min_free_order_shift, fs_type, proc_type;
+ type proc_kpageflags, fs_type, proc_type;
+ type proc_watermark_boost_factor, fs_type, proc_type;
+ # proc, sysfs, or other nodes that permit configuration of kernel usermodehelpers.
++type sysfs_disk_stat, fs_type, sysfs_type;
+ type usermodehelper, fs_type, proc_type;
+ type sysfs_usermodehelper, fs_type, sysfs_type;
+ type proc_qtaguid_ctrl, fs_type, mlstrustedobject, proc_type;
+diff --git a/private/compat/29.0/29.0.ignore.cil b/private/compat/29.0/29.0.ignore.cil
+index e40888dcc..0fddd5311 100644
+--- a/private/compat/29.0/29.0.ignore.cil
++++ b/private/compat/29.0/29.0.ignore.cil
+@@ -100,6 +100,7 @@
+     staged_install_file
+     storage_config_prop
+     surfaceflinger_display_prop
++    sysfs_disk_stat
+     sysfs_dm_verity
+     system_adbd_prop
+     system_config_service
+diff --git a/private/compat/30.0/30.0.ignore.cil b/private/compat/30.0/30.0.ignore.cil
+index 0a3d2e9a3..e8ed9c826 100644
+--- a/private/compat/30.0/30.0.ignore.cil
++++ b/private/compat/30.0/30.0.ignore.cil
+@@ -131,6 +131,7 @@
+     sysfs_devfreq_cur
+     sysfs_devfreq_dir
+     sysfs_devices_cs_etm
++    sysfs_disk_stat
+     sysfs_dma_heap
+     sysfs_dmabuf_stats
+     sysfs_uhid
+diff --git a/private/compat/31.0/31.0.ignore.cil b/private/compat/31.0/31.0.ignore.cil
+index 0e39f3ec3..1b68c0f9c 100644
+--- a/private/compat/31.0/31.0.ignore.cil
++++ b/private/compat/31.0/31.0.ignore.cil
+@@ -42,6 +42,7 @@
+     untrusted_app_30
+     proc_vendor_sched
+     sdk_sandbox_service
++    sysfs_disk_stat
+     sysfs_fs_fuse_bpf
+     sysfs_vendor_sched
+     tv_iapp_service
+diff --git a/private/compat/32.0/32.0.ignore.cil b/private/compat/32.0/32.0.ignore.cil
+index 43ce0a1b6..c1ea25808 100644
+--- a/private/compat/32.0/32.0.ignore.cil
++++ b/private/compat/32.0/32.0.ignore.cil
+@@ -68,6 +68,7 @@
+     selection_toolbar_service
+     smart_idle_maint_enabled_prop
+     snapuserd_proxy_socket
++    sysfs_disk_stat
+     sysfs_fs_fuse_bpf
+     sysfs_gpu
+     sysfs_lru_gen_enabled
+diff --git a/private/compat/33.0/33.0.ignore.cil b/private/compat/33.0/33.0.ignore.cil
+index 0d67f20ed..ad8163009 100644
+--- a/private/compat/33.0/33.0.ignore.cil
++++ b/private/compat/33.0/33.0.ignore.cil
+@@ -70,6 +70,7 @@
+     shutdown_checkpoints_system_data_file
+     snapuserd_log_data_file
+     stats_config_data_file
++    sysfs_disk_stat
+     sysfs_fs_fuse_features
+     system_net_netd_service
+     timezone_metadata_prop
+diff --git a/private/storaged.te b/private/storaged.te
+index bb39e5b73..8b6beed36 100644
+--- a/private/storaged.te
++++ b/private/storaged.te
+@@ -7,6 +7,11 @@ init_daemon_domain(storaged)
+ # Read access to pseudo filesystems
+ r_dir_file(storaged, domain)
+ 
++# Allow read access to /sys/block/mmcblk0/stat or /sys/block/sda/stat.
++# Implementations typically have symlinks to vendor specific files.
++# Vendors should mark sysfs_disk_stat on all files read by storaged.
++r_dir_file(storaged, sysfs_disk_stat)
++
+ # Read /proc/uid_io/stats
+ allow storaged proc_uid_io_stats:file r_file_perms;
+ 
+diff --git a/public/file.te b/public/file.te
+index 01143f739..fbd38cfd7 100644
+--- a/public/file.te
++++ b/public/file.te
+@@ -19,6 +19,7 @@ type proc_watermark_boost_factor, fs_type, proc_type;
+ type proc_percpu_pagelist_high_fraction, fs_type, proc_type;
+ # proc, sysfs, or other nodes that permit configuration of kernel usermodehelpers.
+ type usermodehelper, fs_type, proc_type;
++type sysfs_disk_stat, fs_type, sysfs_type;
+ type sysfs_usermodehelper, fs_type, sysfs_type;
+ type proc_qtaguid_ctrl, fs_type, mlstrustedobject, proc_type;
+ type proc_qtaguid_stat, fs_type, mlstrustedobject, proc_type;
+-- 
+2.43.0
+

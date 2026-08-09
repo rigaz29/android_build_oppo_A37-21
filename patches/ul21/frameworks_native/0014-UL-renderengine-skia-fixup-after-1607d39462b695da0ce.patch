@@ -1,0 +1,90 @@
+From bcd690b1cef9164ad92f88a010b7287142b79444 Mon Sep 17 00:00:00 2001
+From: Yaroslav Zviezda <acroreiser@gmail.com>
+Date: Sat, 6 Apr 2024 20:41:47 +0300
+Subject: [PATCH 14/15] [UL] renderengine,skia: fixup after
+ 1607d39462b695da0ce9ac417f951e9dfa280b9b
+
+Change-Id: I54409b8ff9e8809a37b34fc47fb165b60a4014fe
+---
+ libs/renderengine/skia/Cache.cpp | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/libs/renderengine/skia/Cache.cpp b/libs/renderengine/skia/Cache.cpp
+index 2f852b29ff..8b47913751 100644
+--- a/libs/renderengine/skia/Cache.cpp
++++ b/libs/renderengine/skia/Cache.cpp
+@@ -362,7 +362,7 @@ static void drawImageDimmedLayers(SkiaRenderEngine* renderengine, const DisplayS
+         layer.whitePointNits = layerWhitePoint;
+         layers.push_back(layer);
+     }
+-    renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
++    renderengine->drawLayers(display, layers, dstTexture, kUseFrameBufferCache, base::unique_fd());
+ }
+ 
+ static void drawTransparentImageDimmedLayers(SkiaRenderEngine* renderengine,
+@@ -405,7 +405,7 @@ static void drawTransparentImageDimmedLayers(SkiaRenderEngine* renderengine,
+                     layer.whitePointNits = layerWhitePoint;
+                     layers.push_back(layer);
+                 }
+-                renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
++                renderengine->drawLayers(display, layers, dstTexture, kUseFrameBufferCache, base::unique_fd());
+             }
+         }
+     }
+@@ -455,7 +455,7 @@ static void drawClippedDimmedImageLayers(SkiaRenderEngine* renderengine,
+             layer.whitePointNits = layerWhitePoint;
+             layers.push_back(layer);
+         }
+-        renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
++        renderengine->drawLayers(display, layers, dstTexture, kUseFrameBufferCache, base::unique_fd());
+     }
+ }
+ 
+@@ -482,7 +482,7 @@ static void drawSolidDimmedLayers(SkiaRenderEngine* renderengine, const DisplayS
+         layer.whitePointNits = layerWhitePoint;
+         layers.push_back(layer);
+     }
+-    renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
++    renderengine->drawLayers(display, layers, dstTexture, kUseFrameBufferCache, base::unique_fd());
+ }
+ 
+ static void drawBT2020ImageLayers(SkiaRenderEngine* renderengine, const DisplaySettings& display,
+@@ -514,7 +514,7 @@ static void drawBT2020ImageLayers(SkiaRenderEngine* renderengine, const DisplayS
+         layer.whitePointNits = -1.f;
+         layers.push_back(layer);
+ 
+-        renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
++        renderengine->drawLayers(display, layers, dstTexture, kUseFrameBufferCache, base::unique_fd());
+     }
+ }
+ static void drawBT2020ClippedImageLayers(SkiaRenderEngine* renderengine,
+@@ -548,7 +548,7 @@ static void drawBT2020ClippedImageLayers(SkiaRenderEngine* renderengine,
+     };
+ 
+     std::vector<LayerSettings> layers = {layer};
+-    renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
++    renderengine->drawLayers(display, layers, dstTexture, kUseFrameBufferCache, base::unique_fd());
+ }
+ 
+ static void drawExtendedHDRImageLayers(SkiaRenderEngine* renderengine,
+@@ -585,7 +585,7 @@ static void drawExtendedHDRImageLayers(SkiaRenderEngine* renderengine,
+                 layer.whitePointNits = layerWhitePoint;
+                 layers.push_back(layer);
+             }
+-            renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
++            renderengine->drawLayers(display, layers, dstTexture, kUseFrameBufferCache, base::unique_fd());
+         }
+     }
+ }
+@@ -621,7 +621,7 @@ static void drawP3ImageLayers(SkiaRenderEngine* renderengine, const DisplaySetti
+             layer.whitePointNits = layerWhitePoint;
+             layers.push_back(layer);
+         }
+-        renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
++        renderengine->drawLayers(display, layers, dstTexture, kUseFrameBufferCache, base::unique_fd());
+     }
+ }
+ 
+-- 
+2.43.0
+

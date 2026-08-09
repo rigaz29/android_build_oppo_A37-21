@@ -1,0 +1,42 @@
+From 686877ce6eccd36d18a93d8ed16fdb33545f703d Mon Sep 17 00:00:00 2001
+From: Yaroslav Zviezda <acroreiser@gmail.com>
+Date: Wed, 29 Nov 2023 23:46:53 +0300
+Subject: [PATCH 5/5] Revert "remove inprocess tethering"
+
+This reverts commit 778d7e80a6d9967a874944e3f02f0c04213bf31a.
+---
+ libcutils/fs_config.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libcutils/fs_config.cpp b/libcutils/fs_config.cpp
+index 919be2ff2..d64200f62 100644
+--- a/libcutils/fs_config.cpp
++++ b/libcutils/fs_config.cpp
+@@ -80,12 +80,14 @@ static const struct fs_path_config android_dirs[] = {
+     { 00777, AID_ROOT,         AID_ROOT,         0, "sdcard" },
+     { 00751, AID_ROOT,         AID_SDCARD_R,     0, "storage" },
+     { 00750, AID_ROOT,         AID_SYSTEM,       0, "system/apex/com.android.tethering/bin/for-system" },
++    { 00750, AID_ROOT,         AID_SYSTEM,       0, "system/apex/com.android.tethering.inprocess/bin/for-system" },
+     { 00751, AID_ROOT,         AID_SHELL,        0, "system/bin" },
+     { 00755, AID_ROOT,         AID_ROOT,         0, "system/etc/ppp" },
+     { 00755, AID_ROOT,         AID_SHELL,        0, "system/vendor" },
+     { 00750, AID_ROOT,         AID_SHELL,        0, "system/xbin" },
+     { 00751, AID_ROOT,         AID_SHELL,        0, "system/apex/*/bin" },
+     { 00750, AID_ROOT,         AID_SYSTEM,       0, "system_ext/apex/com.android.tethering/bin/for-system" },
++    { 00750, AID_ROOT,         AID_SYSTEM,       0, "system_ext/apex/com.android.tethering.inprocess/bin/for-system" },
+     { 00751, AID_ROOT,         AID_SHELL,        0, "system_ext/bin" },
+     { 00751, AID_ROOT,         AID_SHELL,        0, "system_ext/apex/*/bin" },
+     { 00751, AID_ROOT,         AID_SHELL,        0, "vendor/bin" },
+@@ -193,7 +195,9 @@ static const struct fs_path_config android_files[] = {
+     // the following files have enhanced capabilities and ARE included
+     // in user builds.
+     { 06755, AID_CLAT,      AID_CLAT,      0, "system/apex/com.android.tethering/bin/for-system/clatd" },
++    { 06755, AID_CLAT,      AID_CLAT,      0, "system/apex/com.android.tethering.inprocess/bin/for-system/clatd" },
+     { 06755, AID_CLAT,      AID_CLAT,      0, "system_ext/apex/com.android.tethering/bin/for-system/clatd" },
++    { 06755, AID_CLAT,      AID_CLAT,      0, "system_ext/apex/com.android.tethering.inprocess/bin/for-system/clatd" },
+     { 00700, AID_SYSTEM,    AID_SHELL,     CAP_MASK_LONG(CAP_BLOCK_SUSPEND),
+                                               "system/bin/inputflinger" },
+     { 00750, AID_ROOT,      AID_SHELL,     CAP_MASK_LONG(CAP_SETUID) |
+-- 
+2.43.0
+

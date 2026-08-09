@@ -1,0 +1,95 @@
+From fff8e14b519d83c7fed1adfdf833ff3ecd98aceb Mon Sep 17 00:00:00 2001
+From: Khalvat-M <mmba313@gmail.com>
+Date: Tue, 25 Oct 2022 06:46:20 +0330
+Subject: [PATCH 06/12] Revert "config: Remove TARGET_HAS_LEGACY_CAMERA_HAL1"
+
+This reverts commit 829f975cd8356a18b166f355ed9b3b9316660920.
+---
+ build/soong/Android.bp     | 50 ++++++++++++++++++++++++++++++++++++++
+ config/BoardConfigSoong.mk |  2 ++
+ 2 files changed, 52 insertions(+)
+
+diff --git a/build/soong/Android.bp b/build/soong/Android.bp
+index 9476c290..f0d998e1 100644
+--- a/build/soong/Android.bp
++++ b/build/soong/Android.bp
+@@ -318,6 +318,56 @@ needs_netd_direct_connect_rule {
+     },
+ }
+ 
++soong_config_module_type {
++    name: "no_cameraserver",
++    module_type: "cc_defaults",
++    config_namespace: "lineageGlobalVars",
++    bool_variables: ["has_legacy_camera_hal1"],
++    properties: [
++        "cppflags",
++    ],
++}
++
++no_cameraserver {
++    name: "no_cameraserver_defaults",
++    soong_config_variables: {
++        has_legacy_camera_hal1: {
++            cppflags: [
++                "-DNO_CAMERA_SERVER",
++                "-Wno-overloaded-virtual",
++            ],
++        },
++    },
++}
++
++soong_config_module_type {
++    name: "camera_in_mediaserver",
++    module_type: "cc_defaults",
++    config_namespace: "lineageGlobalVars",
++    bool_variables: ["has_legacy_camera_hal1"],
++    properties: [
++        "overrides",
++        "shared_libs",
++    ],
++}
++
++camera_in_mediaserver {
++    name: "camera_in_mediaserver_defaults",
++    defaults: ["no_cameraserver_defaults"],
++    soong_config_variables: {
++        has_legacy_camera_hal1: {
++            overrides: ["cameraserver"],
++            shared_libs: [
++                "android.hardware.camera.common@1.0",
++                "android.hardware.camera.device@3.4",
++                "android.hardware.camera.provider@2.6",
++                "libcameraservice",
++                "libgui",
++            ],
++        },
++    },
++}
++
+ soong_config_module_type {
+     name: "has_memfd_backport",
+     module_type: "cc_defaults",
+diff --git a/config/BoardConfigSoong.mk b/config/BoardConfigSoong.mk
+index 4a97b4f6..d4a46e4d 100644
+--- a/config/BoardConfigSoong.mk
++++ b/config/BoardConfigSoong.mk
+@@ -35,6 +35,7 @@ SOONG_CONFIG_lineageGlobalVars += \
+     gralloc_handle_has_custom_content_md_reserved_size \
+     disable_postrender_cleanup \
+     gralloc_handle_has_reserved_size \
++    has_legacy_camera_hal1 \
+     has_memfd_backport \
+     needs_netd_direct_connect_rule \
+     target_health_charging_control_charging_path \
+@@ -78,6 +79,7 @@ SOONG_CONFIG_lineageGlobalVars_gralloc_handle_has_custom_content_md_reserved_siz
+ SOONG_CONFIG_lineageGlobalVars_disable_postrender_cleanup := $(TARGET_DISABLE_POSTRENDER_CLEANUP)
+ SOONG_CONFIG_lineageGlobalVars_gralloc_handle_has_reserved_size := $(TARGET_GRALLOC_HANDLE_HAS_RESERVED_SIZE)
+ SOONG_CONFIG_lineageGlobalVars_gralloc_handle_has_ubwcp_format := $(TARGET_GRALLOC_HANDLE_HAS_UBWCP_FORMAT)
++SOONG_CONFIG_lineageGlobalVars_has_legacy_camera_hal1 := $(TARGET_HAS_LEGACY_CAMERA_HAL1)
+ SOONG_CONFIG_lineageGlobalVars_has_memfd_backport := $(TARGET_HAS_MEMFD_BACKPORT)
+ SOONG_CONFIG_lineageGlobalVars_needs_netd_direct_connect_rule := $(TARGET_NEEDS_NETD_DIRECT_CONNECT_RULE)
+ SOONG_CONFIG_lineageGlobalVars_uses_egl_display_array := $(TARGET_USES_EGL_DISPLAY_ARRAY)
+-- 
+2.43.0
+

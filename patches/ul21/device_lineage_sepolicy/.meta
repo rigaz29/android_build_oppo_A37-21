@@ -1,0 +1,8 @@
+repo: device_lineage_sepolicy
+ul-head: 576e45a239f752f8741dd133f2718e639725bd5f
+ul-head-tanggal: 2025-04-04
+official-head: 126b2bdd0f6fdc815999e44b9e134c7ae6c39d8c
+merge-base: 126b2bdd0f6fdc815999e44b9e134c7ae6c39d8c
+merge-base-tanggal: 2024-11-23
+jumlah-patch: 4
+tanggal-ekstraksi: 2026-08-09T11:40:31Z

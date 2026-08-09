@@ -1,0 +1,242 @@
+From a445eaa5e8a2638135604d9a8ba62f70473b7fc6 Mon Sep 17 00:00:00 2001
+From: Yaroslav Zviezda <acroreiser@gmail.com>
+Date: Sun, 31 Mar 2024 21:53:35 +0300
+Subject: [PATCH 11/15] Revert "RenderEngine, SF: gate HDR priming behind
+ property"
+
+This reverts commit b9b5b706d449212094fd020dfd30509234a8c0b4.
+---
+ .../include/renderengine/RenderEngine.h       |  2 +-
+ .../include/renderengine/mock/RenderEngine.h  |  2 +-
+ libs/renderengine/skia/Cache.cpp              | 20 +++++--------
+ libs/renderengine/skia/Cache.h                |  2 +-
+ libs/renderengine/skia/SkiaRenderEngine.cpp   |  4 +--
+ libs/renderengine/skia/SkiaRenderEngine.h     |  2 +-
+ libs/renderengine/tests/RenderEngineTest.cpp  |  2 +-
+ .../tests/RenderEngineThreadedTest.cpp        |  4 +--
+ .../threaded/RenderEngineThreaded.cpp         | 29 +++++++++----------
+ .../threaded/RenderEngineThreaded.h           |  2 +-
+ services/surfaceflinger/SurfaceFlinger.cpp    |  4 +--
+ 11 files changed, 33 insertions(+), 40 deletions(-)
+
+diff --git a/libs/renderengine/include/renderengine/RenderEngine.h b/libs/renderengine/include/renderengine/RenderEngine.h
+index 8246e29433..3cbf023d2b 100644
+--- a/libs/renderengine/include/renderengine/RenderEngine.h
++++ b/libs/renderengine/include/renderengine/RenderEngine.h
+@@ -109,7 +109,7 @@ public:
+     // This interface, while still in use until a suitable replacement is built,
+     // should be considered deprecated, minus some methods which still may be
+     // used to support legacy behavior.
+-    virtual std::future<void> primeCache(bool shouldPrimeUltraHDR) = 0;
++    virtual std::future<void> primeCache() = 0;
+ 
+     // dump the extension strings. always call the base class.
+     virtual void dump(std::string& result) = 0;
+diff --git a/libs/renderengine/include/renderengine/mock/RenderEngine.h b/libs/renderengine/include/renderengine/mock/RenderEngine.h
+index fd36a2cf48..474f61e681 100644
+--- a/libs/renderengine/include/renderengine/mock/RenderEngine.h
++++ b/libs/renderengine/include/renderengine/mock/RenderEngine.h
+@@ -33,7 +33,7 @@ public:
+     RenderEngine();
+     ~RenderEngine() override;
+ 
+-    MOCK_METHOD1(primeCache, std::future<void>(bool));
++    MOCK_METHOD0(primeCache, std::future<void>());
+     MOCK_METHOD1(dump, void(std::string&));
+     MOCK_METHOD2(genTextures, void(size_t, uint32_t*));
+     MOCK_METHOD2(deleteTextures, void(size_t, uint32_t const*));
+diff --git a/libs/renderengine/skia/Cache.cpp b/libs/renderengine/skia/Cache.cpp
+index 56f4f958a0..2f852b29ff 100644
+--- a/libs/renderengine/skia/Cache.cpp
++++ b/libs/renderengine/skia/Cache.cpp
+@@ -17,7 +17,6 @@
+ #include "AutoBackendTexture.h"
+ #include "SkiaRenderEngine.h"
+ #include "android-base/unique_fd.h"
+-#include "cutils/properties.h"
+ #include "renderengine/DisplaySettings.h"
+ #include "renderengine/LayerSettings.h"
+ #include "renderengine/impl/ExternalTexture.h"
+@@ -637,7 +636,7 @@ static void drawP3ImageLayers(SkiaRenderEngine* renderengine, const DisplaySetti
+ //    kFlushAfterEveryLayer = true
+ // in external/skia/src/gpu/gl/builders/GrGLShaderStringBuilder.cpp
+ //    gPrintSKSL = true
+-void Cache::primeShaderCache(SkiaRenderEngine* renderengine, bool shouldPrimeUltraHDR) {
++void Cache::primeShaderCache(SkiaRenderEngine* renderengine) {
+     const int previousCount = renderengine->reportShadersCompiled();
+     if (previousCount) {
+         ALOGD("%d Shaders already compiled before Cache::primeShaderCache ran\n", previousCount);
+@@ -763,19 +762,16 @@ void Cache::primeShaderCache(SkiaRenderEngine* renderengine, bool shouldPrimeUlt
+                                          externalTexture);
+ 
+         drawClippedDimmedImageLayers(renderengine, bt2020Display, dstTexture, externalTexture);
++        drawBT2020ClippedImageLayers(renderengine, bt2020Display, dstTexture, externalTexture);
+ 
+-        if (shouldPrimeUltraHDR) {
+-            drawBT2020ClippedImageLayers(renderengine, bt2020Display, dstTexture, externalTexture);
++        drawBT2020ImageLayers(renderengine, bt2020Display, dstTexture, externalTexture);
++        drawBT2020ImageLayers(renderengine, p3Display, dstTexture, externalTexture);
+ 
+-            drawBT2020ImageLayers(renderengine, bt2020Display, dstTexture, externalTexture);
+-            drawBT2020ImageLayers(renderengine, p3Display, dstTexture, externalTexture);
++        drawExtendedHDRImageLayers(renderengine, display, dstTexture, externalTexture);
++        drawExtendedHDRImageLayers(renderengine, p3Display, dstTexture, externalTexture);
++        drawExtendedHDRImageLayers(renderengine, p3DisplayEnhance, dstTexture, externalTexture);
+ 
+-            drawExtendedHDRImageLayers(renderengine, display, dstTexture, externalTexture);
+-            drawExtendedHDRImageLayers(renderengine, p3Display, dstTexture, externalTexture);
+-            drawExtendedHDRImageLayers(renderengine, p3DisplayEnhance, dstTexture, externalTexture);
+-
+-            drawP3ImageLayers(renderengine, p3DisplayEnhance, dstTexture, externalTexture);
+-        }
++        drawP3ImageLayers(renderengine, p3DisplayEnhance, dstTexture, externalTexture);
+ 
+         // draw one final layer synchronously to force GL submit
+         LayerSettings layer{
+diff --git a/libs/renderengine/skia/Cache.h b/libs/renderengine/skia/Cache.h
+index 62f6705c89..437571e616 100644
+--- a/libs/renderengine/skia/Cache.h
++++ b/libs/renderengine/skia/Cache.h
+@@ -22,7 +22,7 @@ class SkiaRenderEngine;
+ 
+ class Cache {
+ public:
+-    static void primeShaderCache(SkiaRenderEngine*, bool shouldPrimeUltraHDR);
++    static void primeShaderCache(SkiaRenderEngine*);
+ 
+ private:
+     Cache() = default;
+diff --git a/libs/renderengine/skia/SkiaRenderEngine.cpp b/libs/renderengine/skia/SkiaRenderEngine.cpp
+index 197b012d55..5803f2a067 100644
+--- a/libs/renderengine/skia/SkiaRenderEngine.cpp
++++ b/libs/renderengine/skia/SkiaRenderEngine.cpp
+@@ -244,8 +244,8 @@ namespace skia {
+ 
+ using base::StringAppendF;
+ 
+-std::future<void> SkiaRenderEngine::primeCache(bool shouldPrimeUltraHDR) {
+-    Cache::primeShaderCache(this, shouldPrimeUltraHDR);
++std::future<void> SkiaRenderEngine::primeCache() {
++    Cache::primeShaderCache(this);
+     return {};
+ }
+ 
+diff --git a/libs/renderengine/skia/SkiaRenderEngine.h b/libs/renderengine/skia/SkiaRenderEngine.h
+index d32ff90d92..011052102d 100644
+--- a/libs/renderengine/skia/SkiaRenderEngine.h
++++ b/libs/renderengine/skia/SkiaRenderEngine.h
+@@ -62,7 +62,7 @@ public:
+     SkiaRenderEngine(RenderEngineType type, PixelFormat pixelFormat, bool supportsBackgroundBlur);
+     ~SkiaRenderEngine() override;
+ 
+-    std::future<void> primeCache(bool shouldPrimeUltraHDR) override final;
++    std::future<void> primeCache() override final;
+     void cleanupPostRender() override final;
+     bool supportsBackgroundBlur() override final {
+         return mBlurFilter != nullptr;
+diff --git a/libs/renderengine/tests/RenderEngineTest.cpp b/libs/renderengine/tests/RenderEngineTest.cpp
+index 3d2c807b30..05c411f4cd 100644
+--- a/libs/renderengine/tests/RenderEngineTest.cpp
++++ b/libs/renderengine/tests/RenderEngineTest.cpp
+@@ -3179,7 +3179,7 @@ TEST_P(RenderEngineTest, primeShaderCache) {
+     }
+     initializeRenderEngine();
+ 
+-    auto fut = mRE->primeCache(false);
++    auto fut = mRE->primeCache();
+     if (fut.valid()) {
+         fut.wait();
+     }
+diff --git a/libs/renderengine/tests/RenderEngineThreadedTest.cpp b/libs/renderengine/tests/RenderEngineThreadedTest.cpp
+index a95a3848f2..281a502b06 100644
+--- a/libs/renderengine/tests/RenderEngineThreadedTest.cpp
++++ b/libs/renderengine/tests/RenderEngineThreadedTest.cpp
+@@ -50,8 +50,8 @@ TEST_F(RenderEngineThreadedTest, dump) {
+ }
+ 
+ TEST_F(RenderEngineThreadedTest, primeCache) {
+-    EXPECT_CALL(*mRenderEngine, primeCache(false));
+-    mThreadedRE->primeCache(false);
++    EXPECT_CALL(*mRenderEngine, primeCache());
++    mThreadedRE->primeCache();
+     // need to call ANY synchronous function after primeCache to ensure that primeCache has
+     // completed asynchronously before the test completes execution.
+     mThreadedRE->getContextPriority();
+diff --git a/libs/renderengine/threaded/RenderEngineThreaded.cpp b/libs/renderengine/threaded/RenderEngineThreaded.cpp
+index 385ae4837f..bf2f3fefce 100644
+--- a/libs/renderengine/threaded/RenderEngineThreaded.cpp
++++ b/libs/renderengine/threaded/RenderEngineThreaded.cpp
+@@ -131,7 +131,7 @@ void RenderEngineThreaded::waitUntilInitialized() const {
+     }
+ }
+ 
+-std::future<void> RenderEngineThreaded::primeCache(bool shouldPrimeUltraHDR) {
++std::future<void> RenderEngineThreaded::primeCache() {
+     const auto resultPromise = std::make_shared<std::promise<void>>();
+     std::future<void> resultFuture = resultPromise->get_future();
+     ATRACE_CALL();
+@@ -139,20 +139,19 @@ std::future<void> RenderEngineThreaded::primeCache(bool shouldPrimeUltraHDR) {
+     // for the futures.
+     {
+         std::lock_guard lock(mThreadMutex);
+-        mFunctionCalls.push(
+-                [resultPromise, shouldPrimeUltraHDR](renderengine::RenderEngine& instance) {
+-                    ATRACE_NAME("REThreaded::primeCache");
+-                    if (setSchedFifo(false) != NO_ERROR) {
+-                        ALOGW("Couldn't set SCHED_OTHER for primeCache");
+-                    }
+-
+-                    instance.primeCache(shouldPrimeUltraHDR);
+-                    resultPromise->set_value();
+-
+-                    if (setSchedFifo(true) != NO_ERROR) {
+-                        ALOGW("Couldn't set SCHED_FIFO for primeCache");
+-                    }
+-                });
++        mFunctionCalls.push([resultPromise](renderengine::RenderEngine& instance) {
++            ATRACE_NAME("REThreaded::primeCache");
++            if (setSchedFifo(false) != NO_ERROR) {
++                ALOGW("Couldn't set SCHED_OTHER for primeCache");
++            }
++
++            instance.primeCache();
++            resultPromise->set_value();
++
++            if (setSchedFifo(true) != NO_ERROR) {
++                ALOGW("Couldn't set SCHED_FIFO for primeCache");
++            }
++        });
+     }
+     mCondition.notify_one();
+ 
+diff --git a/libs/renderengine/threaded/RenderEngineThreaded.h b/libs/renderengine/threaded/RenderEngineThreaded.h
+index f489b36e72..32c65c0365 100644
+--- a/libs/renderengine/threaded/RenderEngineThreaded.h
++++ b/libs/renderengine/threaded/RenderEngineThreaded.h
+@@ -42,7 +42,7 @@ public:
+ 
+     RenderEngineThreaded(CreateInstanceFactory factory, RenderEngineType type);
+     ~RenderEngineThreaded() override;
+-    std::future<void> primeCache(bool shouldPrimeUltraHDR) override;
++    std::future<void> primeCache() override;
+ 
+     void dump(std::string& result) override;
+ 
+diff --git a/services/surfaceflinger/SurfaceFlinger.cpp b/services/surfaceflinger/SurfaceFlinger.cpp
+index 12add34a0f..a0c1b645c3 100644
+--- a/services/surfaceflinger/SurfaceFlinger.cpp
++++ b/services/surfaceflinger/SurfaceFlinger.cpp
+@@ -959,9 +959,7 @@ void SurfaceFlinger::init() FTL_FAKE_GUARD(kMainThreadContext) {
+             ALOGW("Can't set SCHED_OTHER for primeCache");
+         }
+ 
+-        bool shouldPrimeUltraHDR =
+-                base::GetBoolProperty("ro.surface_flinger.prime_shader_cache.ultrahdr"s, false);
+-        mRenderEnginePrimeCacheFuture = getRenderEngine().primeCache(shouldPrimeUltraHDR);
++        mRenderEnginePrimeCacheFuture = getRenderEngine().primeCache();
+ 
+         if (setSchedFifo(true) != NO_ERROR) {
+             ALOGW("Can't set SCHED_FIFO after primeCache");
+-- 
+2.43.0
+

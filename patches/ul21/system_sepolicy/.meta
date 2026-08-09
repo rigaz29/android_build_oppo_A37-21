@@ -1,0 +1,8 @@
+repo: system_sepolicy
+ul-head: 0626e9e5249a4290078c98ea358b5544dee6d248
+ul-head-tanggal: 2025-04-04
+official-head: 83bf38d56eac5d44b59bad9b497521274734ee34
+merge-base: 83bf38d56eac5d44b59bad9b497521274734ee34
+merge-base-tanggal: 2024-06-20
+jumlah-patch: 4
+tanggal-ekstraksi: 2026-08-09T11:40:30Z

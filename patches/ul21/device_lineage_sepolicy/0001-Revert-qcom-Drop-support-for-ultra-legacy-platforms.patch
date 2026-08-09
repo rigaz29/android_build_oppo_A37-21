@@ -1,0 +1,40 @@
+From 7b8a1e850ddca60b45a25678325b3d2db24786d5 Mon Sep 17 00:00:00 2001
+From: khalvat-M <mmba313@gmail.com>
+Date: Wed, 8 Nov 2023 07:08:59 +0330
+Subject: [PATCH 1/4] Revert "qcom: Drop support for ultra legacy platforms"
+
+This reverts commit a27c4f09725f1250ac282e1bd86d74f4a6b0fe03.
+---
+ qcom/legacy-vendor/hal_lineage_livedisplay_qti.te | 1 +
+ qcom/sepolicy.mk                                  | 7 ++++++-
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+ create mode 100644 qcom/legacy-vendor/hal_lineage_livedisplay_qti.te
+
+diff --git a/qcom/legacy-vendor/hal_lineage_livedisplay_qti.te b/qcom/legacy-vendor/hal_lineage_livedisplay_qti.te
+new file mode 100644
+index 0000000..c54d52b
+--- /dev/null
++++ b/qcom/legacy-vendor/hal_lineage_livedisplay_qti.te
+@@ -0,0 +1 @@
++unix_socket_connect(hal_lineage_livedisplay_qti, pps, mm-pp-daemon)
+diff --git a/qcom/sepolicy.mk b/qcom/sepolicy.mk
+index 44cb2fc..3a82f60 100644
+--- a/qcom/sepolicy.mk
++++ b/qcom/sepolicy.mk
+@@ -22,7 +22,12 @@ BOARD_VENDOR_SEPOLICY_DIRS += \
+     device/lineage/sepolicy/qcom/vendor
+ endif
+ 
+-ifeq (,$(filter msm8937 msm8953 msm8996 msm8998 sdm660 sdm710 sdm845, $(TARGET_BOARD_PLATFORM)))
++ifneq ($(filter msm8960 msm8226 msm8610 msm8974 apq8084 msm8909 msm8916 msm8952 msm8992 msm8994,$(TARGET_BOARD_PLATFORM)),)
++BOARD_VENDOR_SEPOLICY_DIRS += \
++    device/lineage/sepolicy/qcom/legacy-vendor
++endif
++
++ifeq (,$(filter msm8960 msm8226 msm8610 msm8974 apq8084 msm8909 msm8916 msm8952 msm8992 msm8994 msm8937 msm8953 msm8996 msm8998 sdm660 sdm710 sdm845, $(TARGET_BOARD_PLATFORM)))
+ BOARD_SEPOLICY_M4DEFS += \
+     display_vendor_data_file=vendor_display_vendor_data_file \
+     hal_keymaster_qti_exec=vendor_hal_keymaster_qti_exec \
+-- 
+2.43.0
+

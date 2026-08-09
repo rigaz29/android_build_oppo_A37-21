@@ -1,0 +1,8 @@
+repo: system_netd
+ul-head: c8e50a55d4fb68e2c57d9b21bc9e660a3b229f0b
+ul-head-tanggal: 2025-04-04
+official-head: dbc81b7c46cc59f761c0ac5e390f3fc71dfa7b40
+merge-base: dbc81b7c46cc59f761c0ac5e390f3fc71dfa7b40
+merge-base-tanggal: 2024-09-12
+jumlah-patch: 4
+tanggal-ekstraksi: 2026-08-09T11:40:15Z

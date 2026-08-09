@@ -1,0 +1,1595 @@
+From 33927de6bfbfcf322e7093c31bce41bb729a10e6 Mon Sep 17 00:00:00 2001
+From: Yaroslav Zviezda <acroreiser@gmail.com>
+Date: Sun, 31 Mar 2024 22:18:17 +0300
+Subject: [PATCH 12/15] [UL] Restore GLES Render Engine
+
+This reverts commit e2b61c6265d4cda693daeb1313d0aaab48874452.
+---
+ libs/renderengine/Android.bp                  |  26 ++-
+ libs/renderengine/Description.cpp             |  61 ++++++
+ libs/renderengine/ExternalTexture.cpp         |   8 +
+ libs/renderengine/Mesh.cpp                    | 146 +++++++++++++
+ libs/renderengine/RenderEngine.cpp            |  10 +
+ libs/renderengine/Texture.cpp                 |  77 +++++++
+ .../benchmark/RenderEngineBench.cpp           |   4 +
+ libs/renderengine/gl/GLESRenderEngine.h       |   6 +-
+ .../include/renderengine/Framebuffer.h        |  35 +++
+ .../renderengine/include/renderengine/Image.h |  31 +++
+ libs/renderengine/include/renderengine/Mesh.h | 205 ++++++++++++++++++
+ .../include/renderengine/RenderEngine.h       |   8 +-
+ .../include/renderengine/Texture.h            |  60 +++++
+ .../include/renderengine/mock/Framebuffer.h   |  36 +++
+ .../include/renderengine/mock/Image.h         |  36 +++
+ .../include/renderengine/mock/RenderEngine.h  |   2 +
+ libs/renderengine/mock/Framebuffer.cpp        |  30 +++
+ libs/renderengine/mock/Image.cpp              |  30 +++
+ libs/renderengine/skia/GLExtensions.cpp       | 139 ------------
+ libs/renderengine/skia/GLExtensions.h         |  88 --------
+ libs/renderengine/skia/SkiaGLRenderEngine.cpp |  29 +--
+ libs/renderengine/skia/SkiaRenderEngine.h     |   1 +
+ .../tests/RenderEngineThreadedTest.cpp        |  14 +-
+ .../threaded/RenderEngineThreaded.cpp         |  48 +++-
+ .../threaded/RenderEngineThreaded.h           |   1 +
+ services/surfaceflinger/Layer.h               |   2 +
+ services/surfaceflinger/SurfaceFlinger.cpp    |  10 +-
+ .../tests/unittests/CompositionTest.cpp       |   2 +
+ 28 files changed, 889 insertions(+), 256 deletions(-)
+ create mode 100644 libs/renderengine/Description.cpp
+ create mode 100644 libs/renderengine/Mesh.cpp
+ create mode 100644 libs/renderengine/Texture.cpp
+ create mode 100644 libs/renderengine/include/renderengine/Framebuffer.h
+ create mode 100644 libs/renderengine/include/renderengine/Image.h
+ create mode 100644 libs/renderengine/include/renderengine/Mesh.h
+ create mode 100644 libs/renderengine/include/renderengine/Texture.h
+ create mode 100644 libs/renderengine/include/renderengine/mock/Framebuffer.h
+ create mode 100644 libs/renderengine/include/renderengine/mock/Image.h
+ create mode 100644 libs/renderengine/mock/Framebuffer.cpp
+ create mode 100644 libs/renderengine/mock/Image.cpp
+ delete mode 100644 libs/renderengine/skia/GLExtensions.cpp
+ delete mode 100644 libs/renderengine/skia/GLExtensions.h
+
+diff --git a/libs/renderengine/Android.bp b/libs/renderengine/Android.bp
+index b501d40f26..0792d2c6cd 100644
+--- a/libs/renderengine/Android.bp
++++ b/libs/renderengine/Android.bp
+@@ -65,8 +65,30 @@ cc_library_static {
+ filegroup {
+     name: "librenderengine_sources",
+     srcs: [
++        "Description.cpp",
+         "ExternalTexture.cpp",
++        "Mesh.cpp",
+         "RenderEngine.cpp",
++        "Texture.cpp",
++    ],
++}
++
++filegroup {
++    name: "librenderengine_gl_sources",
++    srcs: [
++        "gl/GLESRenderEngine.cpp",
++        "gl/GLExtensions.cpp",
++        "gl/GLFramebuffer.cpp",
++        "gl/GLImage.cpp",
++        "gl/GLShadowTexture.cpp",
++        "gl/GLShadowVertexGenerator.cpp",
++        "gl/GLSkiaShadowPort.cpp",
++        "gl/GLVertexBuffer.cpp",
++        "gl/ImageManager.cpp",
++        "gl/Program.cpp",
++        "gl/ProgramCache.cpp",
++        "gl/filters/BlurFilter.cpp",
++        "gl/filters/GenericProgram.cpp",
+     ],
+ }
+ 
+@@ -83,7 +105,6 @@ filegroup {
+         "skia/AutoBackendTexture.cpp",
+         "skia/Cache.cpp",
+         "skia/ColorSpaces.cpp",
+-        "skia/GLExtensions.cpp",
+         "skia/SkiaRenderEngine.cpp",
+         "skia/SkiaGLRenderEngine.cpp",
+         "skia/SkiaVkRenderEngine.cpp",
+@@ -124,6 +145,7 @@ cc_library_static {
+     ],
+     srcs: [
+         ":librenderengine_sources",
++        ":librenderengine_gl_sources",
+         ":librenderengine_threaded_sources",
+         ":librenderengine_skia_sources",
+     ],
+@@ -142,6 +164,8 @@ cc_library_static {
+     name: "librenderengine_mocks",
+     defaults: ["librenderengine_defaults"],
+     srcs: [
++        "mock/Framebuffer.cpp",
++        "mock/Image.cpp",
+         "mock/RenderEngine.cpp",
+     ],
+     static_libs: [
+diff --git a/libs/renderengine/Description.cpp b/libs/renderengine/Description.cpp
+new file mode 100644
+index 0000000000..245c9e1e30
+--- /dev/null
++++ b/libs/renderengine/Description.cpp
+@@ -0,0 +1,61 @@
++/*
++ * Copyright 2013 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <renderengine/private/Description.h>
++
++#include <stdint.h>
++
++#include <utils/TypeHelpers.h>
++
++namespace android {
++namespace renderengine {
++
++Description::TransferFunction Description::dataSpaceToTransferFunction(ui::Dataspace dataSpace) {
++    ui::Dataspace transfer = static_cast<ui::Dataspace>(dataSpace & ui::Dataspace::TRANSFER_MASK);
++    switch (transfer) {
++        case ui::Dataspace::TRANSFER_ST2084:
++            return Description::TransferFunction::ST2084;
++        case ui::Dataspace::TRANSFER_HLG:
++            return Description::TransferFunction::HLG;
++        case ui::Dataspace::TRANSFER_LINEAR:
++            return Description::TransferFunction::LINEAR;
++        default:
++            return Description::TransferFunction::SRGB;
++    }
++}
++
++bool Description::hasInputTransformMatrix() const {
++    const mat4 identity;
++    return inputTransformMatrix != identity;
++}
++
++bool Description::hasOutputTransformMatrix() const {
++    const mat4 identity;
++    return outputTransformMatrix != identity;
++}
++
++bool Description::hasColorMatrix() const {
++    const mat4 identity;
++    return colorMatrix != identity;
++}
++
++bool Description::hasDisplayColorMatrix() const {
++    const mat4 identity;
++    return displayColorMatrix != identity;
++}
++
++} // namespace renderengine
++} // namespace android
+diff --git a/libs/renderengine/ExternalTexture.cpp b/libs/renderengine/ExternalTexture.cpp
+index 6f2a96a87b..9eb42cd8e1 100644
+--- a/libs/renderengine/ExternalTexture.cpp
++++ b/libs/renderengine/ExternalTexture.cpp
+@@ -27,6 +27,14 @@ ExternalTexture::ExternalTexture(const sp<GraphicBuffer>& buffer,
+       : mBuffer(buffer), mRenderEngine(renderEngine), mWritable(usage & WRITEABLE) {
+     LOG_ALWAYS_FATAL_IF(buffer == nullptr,
+                         "Attempted to bind a null buffer to an external texture!");
++    // GLESRenderEngine has a separate texture cache for output buffers,
++    if (usage == WRITEABLE &&
++        (mRenderEngine.getRenderEngineType() ==
++                 renderengine::RenderEngine::RenderEngineType::GLES ||
++         mRenderEngine.getRenderEngineType() ==
++                 renderengine::RenderEngine::RenderEngineType::THREADED)) {
++        return;
++    }
+     mRenderEngine.mapExternalTextureBuffer(mBuffer, mWritable);
+ }
+ 
+diff --git a/libs/renderengine/Mesh.cpp b/libs/renderengine/Mesh.cpp
+new file mode 100644
+index 0000000000..ed2f45fdf5
+--- /dev/null
++++ b/libs/renderengine/Mesh.cpp
+@@ -0,0 +1,146 @@
++/*
++ * Copyright 2013 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <renderengine/Mesh.h>
++
++#include <utils/Log.h>
++
++namespace android {
++namespace renderengine {
++
++Mesh::Mesh(Primitive primitive, size_t vertexCount, size_t vertexSize, size_t texCoordSize,
++           size_t cropCoordsSize, size_t shadowColorSize, size_t shadowParamsSize,
++           size_t indexCount)
++      : mVertexCount(vertexCount),
++        mVertexSize(vertexSize),
++        mTexCoordsSize(texCoordSize),
++        mCropCoordsSize(cropCoordsSize),
++        mShadowColorSize(shadowColorSize),
++        mShadowParamsSize(shadowParamsSize),
++        mPrimitive(primitive),
++        mIndexCount(indexCount) {
++    if (vertexCount == 0) {
++        mVertices.resize(1);
++        mVertices[0] = 0.0f;
++        mStride = 0;
++        return;
++    }
++    size_t stride = vertexSize + texCoordSize + cropCoordsSize + shadowColorSize + shadowParamsSize;
++    size_t remainder = (stride * vertexCount) / vertexCount;
++    // Since all of the input parameters are unsigned, if stride is less than
++    // either vertexSize or texCoordSize, it must have overflowed. remainder
++    // will be equal to stride as long as stride * vertexCount doesn't overflow.
++    if ((stride < vertexSize) || (remainder != stride)) {
++        ALOGE("Overflow in Mesh(..., %zu, %zu, %zu, %zu, %zu, %zu)", vertexCount, vertexSize,
++              texCoordSize, cropCoordsSize, shadowColorSize, shadowParamsSize);
++        mVertices.resize(1);
++        mVertices[0] = 0.0f;
++        mVertexCount = 0;
++        mVertexSize = 0;
++        mTexCoordsSize = 0;
++        mCropCoordsSize = 0;
++        mShadowColorSize = 0;
++        mShadowParamsSize = 0;
++        mStride = 0;
++        return;
++    }
++
++    mVertices.resize(stride * vertexCount);
++    mStride = stride;
++    mIndices.resize(indexCount);
++}
++
++Mesh::Primitive Mesh::getPrimitive() const {
++    return mPrimitive;
++}
++
++float const* Mesh::getPositions() const {
++    return mVertices.data();
++}
++float* Mesh::getPositions() {
++    return mVertices.data();
++}
++
++float const* Mesh::getTexCoords() const {
++    return mVertices.data() + mVertexSize;
++}
++float* Mesh::getTexCoords() {
++    return mVertices.data() + mVertexSize;
++}
++
++float const* Mesh::getCropCoords() const {
++    return mVertices.data() + mVertexSize + mTexCoordsSize;
++}
++float* Mesh::getCropCoords() {
++    return mVertices.data() + mVertexSize + mTexCoordsSize;
++}
++
++float const* Mesh::getShadowColor() const {
++    return mVertices.data() + mVertexSize + mTexCoordsSize + mCropCoordsSize;
++}
++float* Mesh::getShadowColor() {
++    return mVertices.data() + mVertexSize + mTexCoordsSize + mCropCoordsSize;
++}
++
++float const* Mesh::getShadowParams() const {
++    return mVertices.data() + mVertexSize + mTexCoordsSize + mCropCoordsSize + mShadowColorSize;
++}
++float* Mesh::getShadowParams() {
++    return mVertices.data() + mVertexSize + mTexCoordsSize + mCropCoordsSize + mShadowColorSize;
++}
++
++uint16_t const* Mesh::getIndices() const {
++    return mIndices.data();
++}
++
++uint16_t* Mesh::getIndices() {
++    return mIndices.data();
++}
++
++size_t Mesh::getVertexCount() const {
++    return mVertexCount;
++}
++
++size_t Mesh::getVertexSize() const {
++    return mVertexSize;
++}
++
++size_t Mesh::getTexCoordsSize() const {
++    return mTexCoordsSize;
++}
++
++size_t Mesh::getShadowColorSize() const {
++    return mShadowColorSize;
++}
++
++size_t Mesh::getShadowParamsSize() const {
++    return mShadowParamsSize;
++}
++
++size_t Mesh::getByteStride() const {
++    return mStride * sizeof(float);
++}
++
++size_t Mesh::getStride() const {
++    return mStride;
++}
++
++size_t Mesh::getIndexCount() const {
++    return mIndexCount;
++}
++
++} // namespace renderengine
++} // namespace android
+diff --git a/libs/renderengine/RenderEngine.cpp b/libs/renderengine/RenderEngine.cpp
+index a8e92c6807..d08c2213ad 100644
+--- a/libs/renderengine/RenderEngine.cpp
++++ b/libs/renderengine/RenderEngine.cpp
+@@ -18,6 +18,7 @@
+ 
+ #include <cutils/properties.h>
+ #include <log/log.h>
++#include "gl/GLESRenderEngine.h"
+ #include "renderengine/ExternalTexture.h"
+ #include "threaded/RenderEngineThreaded.h"
+ 
+@@ -29,6 +30,11 @@ namespace renderengine {
+ 
+ std::unique_ptr<RenderEngine> RenderEngine::create(const RenderEngineCreationArgs& args) {
+     switch (args.renderEngineType) {
++        case RenderEngineType::THREADED:
++            ALOGD("Threaded RenderEngine with GLES Backend");
++            return renderengine::threaded::RenderEngineThreaded::create(
++                    [args]() { return android::renderengine::gl::GLESRenderEngine::create(args); },
++                    args.renderEngineType);
+         case RenderEngineType::SKIA_GL:
+             ALOGD("RenderEngine with SkiaGL Backend");
+             return renderengine::skia::SkiaGLRenderEngine::create(args);
+@@ -50,6 +56,10 @@ std::unique_ptr<RenderEngine> RenderEngine::create(const RenderEngineCreationArg
+                         return android::renderengine::skia::SkiaVkRenderEngine::create(args);
+                     },
+                     args.renderEngineType);
++        case RenderEngineType::GLES:
++        default:
++            ALOGD("RenderEngine with GLES Backend");
++            return renderengine::gl::GLESRenderEngine::create(args);
+     }
+ }
+ 
+diff --git a/libs/renderengine/Texture.cpp b/libs/renderengine/Texture.cpp
+new file mode 100644
+index 0000000000..154cde80b9
+--- /dev/null
++++ b/libs/renderengine/Texture.cpp
+@@ -0,0 +1,77 @@
++/*
++ * Copyright 2013 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <renderengine/Texture.h>
++
++namespace android {
++namespace renderengine {
++
++Texture::Texture()
++      : mTextureName(0), mTextureTarget(TEXTURE_2D), mWidth(0), mHeight(0), mFiltering(false) {}
++
++Texture::Texture(Target textureTarget, uint32_t textureName)
++      : mTextureName(textureName),
++        mTextureTarget(textureTarget),
++        mWidth(0),
++        mHeight(0),
++        mFiltering(false) {}
++
++void Texture::init(Target textureTarget, uint32_t textureName) {
++    mTextureName = textureName;
++    mTextureTarget = textureTarget;
++}
++
++Texture::~Texture() {}
++
++void Texture::setMatrix(float const* matrix) {
++    mTextureMatrix = mat4(matrix);
++}
++
++void Texture::setFiltering(bool enabled) {
++    mFiltering = enabled;
++}
++
++void Texture::setDimensions(size_t width, size_t height) {
++    mWidth = width;
++    mHeight = height;
++}
++
++uint32_t Texture::getTextureName() const {
++    return mTextureName;
++}
++
++uint32_t Texture::getTextureTarget() const {
++    return mTextureTarget;
++}
++
++const mat4& Texture::getMatrix() const {
++    return mTextureMatrix;
++}
++
++bool Texture::getFiltering() const {
++    return mFiltering;
++}
++
++size_t Texture::getWidth() const {
++    return mWidth;
++}
++
++size_t Texture::getHeight() const {
++    return mHeight;
++}
++
++} // namespace renderengine
++} // namespace android
+diff --git a/libs/renderengine/benchmark/RenderEngineBench.cpp b/libs/renderengine/benchmark/RenderEngineBench.cpp
+index ce2c7d7b6b..791d4c94b4 100644
+--- a/libs/renderengine/benchmark/RenderEngineBench.cpp
++++ b/libs/renderengine/benchmark/RenderEngineBench.cpp
+@@ -43,6 +43,10 @@ std::string RenderEngineTypeName(RenderEngine::RenderEngineType type) {
+             return "skiavk";
+         case RenderEngine::RenderEngineType::SKIA_VK_THREADED:
+             return "skiavkthreaded";
++        case RenderEngine::RenderEngineType::GLES:
++        case RenderEngine::RenderEngineType::THREADED:
++            LOG_ALWAYS_FATAL("GLESRenderEngine is deprecated - why time it?");
++            return "unused";
+     }
+ }
+ 
+diff --git a/libs/renderengine/gl/GLESRenderEngine.h b/libs/renderengine/gl/GLESRenderEngine.h
+index c750324a41..f5368d4e9f 100644
+--- a/libs/renderengine/gl/GLESRenderEngine.h
++++ b/libs/renderengine/gl/GLESRenderEngine.h
+@@ -59,8 +59,8 @@ public:
+     ~GLESRenderEngine() override EXCLUDES(mRenderingMutex);
+ 
+     std::future<void> primeCache() override;
+-    void genTextures(size_t count, uint32_t* names);
+-    void deleteTextures(size_t count, uint32_t const* names);
++    void genTextures(size_t count, uint32_t* names) override;
++    void deleteTextures(size_t count, uint32_t const* names) override;
+     bool isProtected() const { return mInProtectedContext; }
+     bool supportsProtectedContent() const override;
+     void useProtectedContext(bool useProtectedContext) override;
+@@ -107,7 +107,7 @@ protected:
+                             const DisplaySettings& display,
+                             const std::vector<LayerSettings>& layers,
+                             const std::shared_ptr<ExternalTexture>& buffer,
+-                            const bool useFramebufferCache, base::unique_fd&& bufferFence);
++                            const bool useFramebufferCache, base::unique_fd&& bufferFence) override;
+ 
+ private:
+     friend class BindNativeBufferAsFramebuffer;
+diff --git a/libs/renderengine/include/renderengine/Framebuffer.h b/libs/renderengine/include/renderengine/Framebuffer.h
+new file mode 100644
+index 0000000000..65111278e0
+--- /dev/null
++++ b/libs/renderengine/include/renderengine/Framebuffer.h
+@@ -0,0 +1,35 @@
++/*
++ * Copyright 2018 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <cstdint>
++
++struct ANativeWindowBuffer;
++
++namespace android {
++namespace renderengine {
++
++class Framebuffer {
++public:
++    virtual ~Framebuffer() = default;
++
++    virtual bool setNativeWindowBuffer(ANativeWindowBuffer* nativeBuffer, bool isProtected,
++                                       const bool useFramebufferCache) = 0;
++};
++
++} // namespace renderengine
++} // namespace android
+diff --git a/libs/renderengine/include/renderengine/Image.h b/libs/renderengine/include/renderengine/Image.h
+new file mode 100644
+index 0000000000..3bb47318ef
+--- /dev/null
++++ b/libs/renderengine/include/renderengine/Image.h
+@@ -0,0 +1,31 @@
++/*
++ * Copyright 2017 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++struct ANativeWindowBuffer;
++
++namespace android {
++namespace renderengine {
++
++class Image {
++public:
++    virtual ~Image() = default;
++    virtual bool setNativeWindowBuffer(ANativeWindowBuffer* buffer, bool isProtected) = 0;
++};
++
++} // namespace renderengine
++} // namespace android
+diff --git a/libs/renderengine/include/renderengine/Mesh.h b/libs/renderengine/include/renderengine/Mesh.h
+new file mode 100644
+index 0000000000..167f13f1bc
+--- /dev/null
++++ b/libs/renderengine/include/renderengine/Mesh.h
+@@ -0,0 +1,205 @@
++/*
++ * Copyright 2013 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef SF_RENDER_ENGINE_MESH_H
++#define SF_RENDER_ENGINE_MESH_H
++
++#include <vector>
++
++#include <stdint.h>
++
++namespace android {
++namespace renderengine {
++
++class Mesh {
++public:
++    class Builder;
++
++    enum Primitive {
++        TRIANGLES = 0x0004,      // GL_TRIANGLES
++        TRIANGLE_STRIP = 0x0005, // GL_TRIANGLE_STRIP
++        TRIANGLE_FAN = 0x0006    // GL_TRIANGLE_FAN
++    };
++
++    ~Mesh() = default;
++
++    /*
++     * VertexArray handles the stride automatically.
++     */
++    template <typename TYPE>
++    class VertexArray {
++        friend class Mesh;
++        float* mData;
++        size_t mStride;
++        size_t mOffset = 0;
++        VertexArray(float* data, size_t stride) : mData(data), mStride(stride) {}
++
++    public:
++        // Returns a vertex array at an offset so its easier to append attributes from
++        // multiple sources.
++        VertexArray(VertexArray<TYPE>& other, size_t offset)
++              : mData(other.mData), mStride(other.mStride), mOffset(offset) {}
++
++        TYPE& operator[](size_t index) {
++            return *reinterpret_cast<TYPE*>(&mData[(index + mOffset) * mStride]);
++        }
++        TYPE const& operator[](size_t index) const {
++            return *reinterpret_cast<TYPE const*>(&mData[(index + mOffset) * mStride]);
++        }
++    };
++
++    template <typename TYPE>
++    VertexArray<TYPE> getPositionArray() {
++        return VertexArray<TYPE>(getPositions(), mStride);
++    }
++
++    template <typename TYPE>
++    VertexArray<TYPE> getTexCoordArray() {
++        return VertexArray<TYPE>(getTexCoords(), mStride);
++    }
++
++    template <typename TYPE>
++    VertexArray<TYPE> getCropCoordArray() {
++        return VertexArray<TYPE>(getCropCoords(), mStride);
++    }
++
++    template <typename TYPE>
++    VertexArray<TYPE> getShadowColorArray() {
++        return VertexArray<TYPE>(getShadowColor(), mStride);
++    }
++
++    template <typename TYPE>
++    VertexArray<TYPE> getShadowParamsArray() {
++        return VertexArray<TYPE>(getShadowParams(), mStride);
++    }
++
++    uint16_t* getIndicesArray() { return getIndices(); }
++
++    Primitive getPrimitive() const;
++
++    // returns a pointer to the vertices positions
++    float const* getPositions() const;
++
++    // returns a pointer to the vertices texture coordinates
++    float const* getTexCoords() const;
++
++    // returns a pointer to the vertices crop coordinates
++    float const* getCropCoords() const;
++
++    // returns a pointer to colors
++    float const* getShadowColor() const;
++
++    // returns a pointer to the shadow params
++    float const* getShadowParams() const;
++
++    // returns a pointer to indices
++    uint16_t const* getIndices() const;
++
++    // number of vertices in this mesh
++    size_t getVertexCount() const;
++
++    // dimension of vertices
++    size_t getVertexSize() const;
++
++    // dimension of texture coordinates
++    size_t getTexCoordsSize() const;
++
++    size_t getShadowParamsSize() const;
++
++    size_t getShadowColorSize() const;
++
++    size_t getIndexCount() const;
++
++    // return stride in bytes
++    size_t getByteStride() const;
++
++    // return stride in floats
++    size_t getStride() const;
++
++private:
++    Mesh(Primitive primitive, size_t vertexCount, size_t vertexSize, size_t texCoordSize,
++         size_t cropCoordsSize, size_t shadowColorSize, size_t shadowParamsSize, size_t indexCount);
++    Mesh(const Mesh&);
++    Mesh& operator=(const Mesh&);
++    Mesh const& operator=(const Mesh&) const;
++
++    float* getPositions();
++    float* getTexCoords();
++    float* getCropCoords();
++    float* getShadowColor();
++    float* getShadowParams();
++    uint16_t* getIndices();
++
++    std::vector<float> mVertices;
++    size_t mVertexCount;
++    size_t mVertexSize;
++    size_t mTexCoordsSize;
++    size_t mCropCoordsSize;
++    size_t mShadowColorSize;
++    size_t mShadowParamsSize;
++    size_t mStride;
++    Primitive mPrimitive;
++    std::vector<uint16_t> mIndices;
++    size_t mIndexCount;
++};
++
++class Mesh::Builder {
++public:
++    Builder& setPrimitive(Primitive primitive) {
++        mPrimitive = primitive;
++        return *this;
++    };
++    Builder& setVertices(size_t vertexCount, size_t vertexSize) {
++        mVertexCount = vertexCount;
++        mVertexSize = vertexSize;
++        return *this;
++    };
++    Builder& setTexCoords(size_t texCoordsSize) {
++        mTexCoordsSize = texCoordsSize;
++        return *this;
++    };
++    Builder& setCropCoords(size_t cropCoordsSize) {
++        mCropCoordsSize = cropCoordsSize;
++        return *this;
++    };
++    Builder& setShadowAttrs() {
++        mShadowParamsSize = 3;
++        mShadowColorSize = 4;
++        return *this;
++    };
++    Builder& setIndices(size_t indexCount) {
++        mIndexCount = indexCount;
++        return *this;
++    };
++    Mesh build() const {
++        return Mesh{mPrimitive,      mVertexCount,     mVertexSize,       mTexCoordsSize,
++                    mCropCoordsSize, mShadowColorSize, mShadowParamsSize, mIndexCount};
++    }
++
++private:
++    size_t mVertexCount = 0;
++    size_t mVertexSize = 0;
++    size_t mTexCoordsSize = 0;
++    size_t mCropCoordsSize = 0;
++    size_t mShadowColorSize = 0;
++    size_t mShadowParamsSize = 0;
++    size_t mIndexCount = 0;
++    Primitive mPrimitive;
++};
++
++} // namespace renderengine
++} // namespace android
++#endif /* SF_RENDER_ENGINE_MESH_H */
+diff --git a/libs/renderengine/include/renderengine/RenderEngine.h b/libs/renderengine/include/renderengine/RenderEngine.h
+index 3cbf023d2b..46bdaf0f5c 100644
+--- a/libs/renderengine/include/renderengine/RenderEngine.h
++++ b/libs/renderengine/include/renderengine/RenderEngine.h
+@@ -22,6 +22,8 @@
+ #include <math/mat4.h>
+ #include <renderengine/DisplaySettings.h>
+ #include <renderengine/ExternalTexture.h>
++#include <renderengine/Framebuffer.h>
++#include <renderengine/Image.h>
+ #include <renderengine/LayerSettings.h>
+ #include <stdint.h>
+ #include <sys/types.h>
+@@ -93,6 +95,8 @@ public:
+     };
+ 
+     enum class RenderEngineType {
++        GLES = 1,
++        THREADED = 2,
+         SKIA_GL = 3,
+         SKIA_GL_THREADED = 4,
+         SKIA_VK = 5,
+@@ -169,6 +173,8 @@ public:
+     // being drawn, then the implementation is free to silently ignore this call.
+     virtual void cleanupPostRender() = 0;
+ 
++    virtual void cleanFramebufferCache() = 0;
++
+     // Returns the priority this context was actually created with. Note: this
+     // may not be the same as specified at context creation time, due to
+     // implementation limits on the number of contexts that can be created at a
+@@ -200,7 +206,7 @@ public:
+     virtual void setEnableTracing(bool /*tracingEnabled*/) {}
+ 
+ protected:
+-    RenderEngine() : RenderEngine(RenderEngineType::SKIA_GL) {}
++    RenderEngine() : RenderEngine(RenderEngineType::GLES) {}
+ 
+     RenderEngine(RenderEngineType type) : mRenderEngineType(type) {}
+ 
+diff --git a/libs/renderengine/include/renderengine/Texture.h b/libs/renderengine/include/renderengine/Texture.h
+new file mode 100644
+index 0000000000..c69ace0603
+--- /dev/null
++++ b/libs/renderengine/include/renderengine/Texture.h
+@@ -0,0 +1,60 @@
++/*
++ * Copyright 2013 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef SF_RENDER_ENGINE_TEXTURE_H
++#define SF_RENDER_ENGINE_TEXTURE_H
++
++#include <stdint.h>
++
++#include <math/mat4.h>
++
++namespace android {
++namespace renderengine {
++
++class Texture {
++public:
++    enum Target { TEXTURE_2D = 0x0DE1, TEXTURE_EXTERNAL = 0x8D65 };
++
++    Texture();
++    Texture(Target textureTarget, uint32_t textureName);
++    ~Texture();
++
++    void init(Target textureTarget, uint32_t textureName);
++
++    void setMatrix(float const* matrix);
++    void setFiltering(bool enabled);
++    void setDimensions(size_t width, size_t height);
++
++    uint32_t getTextureName() const;
++    uint32_t getTextureTarget() const;
++
++    const mat4& getMatrix() const;
++    bool getFiltering() const;
++    size_t getWidth() const;
++    size_t getHeight() const;
++
++private:
++    uint32_t mTextureName;
++    uint32_t mTextureTarget;
++    size_t mWidth;
++    size_t mHeight;
++    bool mFiltering;
++    mat4 mTextureMatrix;
++};
++
++} // namespace renderengine
++} // namespace android
++#endif /* SF_RENDER_ENGINE_TEXTURE_H */
+diff --git a/libs/renderengine/include/renderengine/mock/Framebuffer.h b/libs/renderengine/include/renderengine/mock/Framebuffer.h
+new file mode 100644
+index 0000000000..dfb6a4e41e
+--- /dev/null
++++ b/libs/renderengine/include/renderengine/mock/Framebuffer.h
+@@ -0,0 +1,36 @@
++/*
++ * Copyright 2018 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <gmock/gmock.h>
++#include <renderengine/Framebuffer.h>
++
++namespace android {
++namespace renderengine {
++namespace mock {
++
++class Framebuffer : public renderengine::Framebuffer {
++public:
++    Framebuffer();
++    ~Framebuffer() override;
++
++    MOCK_METHOD3(setNativeWindowBuffer, bool(ANativeWindowBuffer*, bool, const bool));
++};
++
++} // namespace mock
++} // namespace renderengine
++} // namespace android
+diff --git a/libs/renderengine/include/renderengine/mock/Image.h b/libs/renderengine/include/renderengine/mock/Image.h
+new file mode 100644
+index 0000000000..2b0eed1173
+--- /dev/null
++++ b/libs/renderengine/include/renderengine/mock/Image.h
+@@ -0,0 +1,36 @@
++/*
++ * Copyright 2018 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <gmock/gmock.h>
++#include <renderengine/Image.h>
++
++namespace android {
++namespace renderengine {
++namespace mock {
++
++class Image : public renderengine::Image {
++public:
++    Image();
++    ~Image() override;
++
++    MOCK_METHOD2(setNativeWindowBuffer, bool(ANativeWindowBuffer* buffer, bool isProtected));
++};
++
++} // namespace mock
++} // namespace renderengine
++} // namespace android
+diff --git a/libs/renderengine/include/renderengine/mock/RenderEngine.h b/libs/renderengine/include/renderengine/mock/RenderEngine.h
+index 474f61e681..c0ce53b269 100644
+--- a/libs/renderengine/include/renderengine/mock/RenderEngine.h
++++ b/libs/renderengine/include/renderengine/mock/RenderEngine.h
+@@ -19,7 +19,9 @@
+ #include <gmock/gmock.h>
+ #include <renderengine/DisplaySettings.h>
+ #include <renderengine/LayerSettings.h>
++#include <renderengine/Mesh.h>
+ #include <renderengine/RenderEngine.h>
++#include <renderengine/Texture.h>
+ #include <ui/Fence.h>
+ #include <ui/GraphicBuffer.h>
+ #include <ui/Region.h>
+diff --git a/libs/renderengine/mock/Framebuffer.cpp b/libs/renderengine/mock/Framebuffer.cpp
+new file mode 100644
+index 0000000000..fbdcaab697
+--- /dev/null
++++ b/libs/renderengine/mock/Framebuffer.cpp
+@@ -0,0 +1,30 @@
++/*
++ * Copyright 2018 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <renderengine/mock/Framebuffer.h>
++
++namespace android {
++namespace renderengine {
++namespace mock {
++
++// The Google Mock documentation recommends explicit non-header instantiations
++// for better compile time performance.
++Framebuffer::Framebuffer() = default;
++Framebuffer::~Framebuffer() = default;
++
++} // namespace mock
++} // namespace renderengine
++} // namespace android
+diff --git a/libs/renderengine/mock/Image.cpp b/libs/renderengine/mock/Image.cpp
+new file mode 100644
+index 0000000000..57f4346f8f
+--- /dev/null
++++ b/libs/renderengine/mock/Image.cpp
+@@ -0,0 +1,30 @@
++/*
++ * Copyright 2018 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <renderengine/mock/Image.h>
++
++namespace android {
++namespace renderengine {
++namespace mock {
++
++// The Google Mock documentation recommends explicit non-header instantiations
++// for better compile time performance.
++Image::Image() = default;
++Image::~Image() = default;
++
++} // namespace mock
++} // namespace renderengine
++} // namespace android
+diff --git a/libs/renderengine/skia/GLExtensions.cpp b/libs/renderengine/skia/GLExtensions.cpp
+deleted file mode 100644
+index 1d4d35fb54..0000000000
+--- a/libs/renderengine/skia/GLExtensions.cpp
++++ /dev/null
+@@ -1,139 +0,0 @@
+-/*
+- * Copyright (C) 2010 The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-#include "GLExtensions.h"
+-
+-#include <string>
+-#include <unordered_set>
+-
+-#include <stdint.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-
+-ANDROID_SINGLETON_STATIC_INSTANCE(android::renderengine::skia::GLExtensions)
+-
+-namespace android {
+-namespace renderengine {
+-namespace skia {
+-
+-namespace {
+-
+-class ExtensionSet {
+-public:
+-    ExtensionSet(const char* extensions) {
+-        char const* curr = extensions;
+-        char const* head = curr;
+-        do {
+-            head = strchr(curr, ' ');
+-            size_t len = head ? head - curr : strlen(curr);
+-            if (len > 0) {
+-                mExtensions.emplace(curr, len);
+-            }
+-            curr = head + 1;
+-        } while (head);
+-    }
+-
+-    bool hasExtension(const char* extension) const { return mExtensions.count(extension) > 0; }
+-
+-private:
+-    std::unordered_set<std::string> mExtensions;
+-};
+-
+-} // anonymous namespace
+-
+-void GLExtensions::initWithGLStrings(GLubyte const* vendor, GLubyte const* renderer,
+-                                     GLubyte const* version, GLubyte const* extensions) {
+-    mVendor = (char const*)vendor;
+-    mRenderer = (char const*)renderer;
+-    mVersion = (char const*)version;
+-    mExtensions = (char const*)extensions;
+-
+-    ExtensionSet extensionSet(mExtensions.c_str());
+-    if (extensionSet.hasExtension("GL_EXT_protected_textures")) {
+-        mHasProtectedTexture = true;
+-    }
+-}
+-
+-char const* GLExtensions::getVendor() const {
+-    return mVendor.c_str();
+-}
+-
+-char const* GLExtensions::getRenderer() const {
+-    return mRenderer.c_str();
+-}
+-
+-char const* GLExtensions::getVersion() const {
+-    return mVersion.c_str();
+-}
+-
+-char const* GLExtensions::getExtensions() const {
+-    return mExtensions.c_str();
+-}
+-
+-void GLExtensions::initWithEGLStrings(char const* eglVersion, char const* eglExtensions) {
+-    mEGLVersion = eglVersion;
+-    mEGLExtensions = eglExtensions;
+-
+-    ExtensionSet extensionSet(eglExtensions);
+-
+-    // EGL_ANDROIDX_no_config_context is an experimental extension with no
+-    // written specification. It will be replaced by something more formal.
+-    // SurfaceFlinger is using it to allow a single EGLContext to render to
+-    // both a 16-bit primary display framebuffer and a 32-bit virtual display
+-    // framebuffer.
+-    //
+-    // EGL_KHR_no_config_context is official extension to allow creating a
+-    // context that works with any surface of a display.
+-    if (extensionSet.hasExtension("EGL_ANDROIDX_no_config_context") ||
+-        extensionSet.hasExtension("EGL_KHR_no_config_context")) {
+-        mHasNoConfigContext = true;
+-    }
+-
+-    if (extensionSet.hasExtension("EGL_ANDROID_native_fence_sync")) {
+-        mHasNativeFenceSync = true;
+-    }
+-    if (extensionSet.hasExtension("EGL_KHR_fence_sync")) {
+-        mHasFenceSync = true;
+-    }
+-    if (extensionSet.hasExtension("EGL_KHR_wait_sync")) {
+-        mHasWaitSync = true;
+-    }
+-    if (extensionSet.hasExtension("EGL_EXT_protected_content")) {
+-        mHasProtectedContent = true;
+-    }
+-    if (extensionSet.hasExtension("EGL_IMG_context_priority")) {
+-        mHasContextPriority = true;
+-    }
+-    if (extensionSet.hasExtension("EGL_KHR_surfaceless_context")) {
+-        mHasSurfacelessContext = true;
+-    }
+-
+-    if (extensionSet.hasExtension("EGL_NV_context_priority_realtime")) {
+-        mHasRealtimePriority = true;
+-    }
+-}
+-
+-char const* GLExtensions::getEGLVersion() const {
+-    return mEGLVersion.c_str();
+-}
+-
+-char const* GLExtensions::getEGLExtensions() const {
+-    return mEGLExtensions.c_str();
+-}
+-
+-} // namespace skia
+-} // namespace renderengine
+-} // namespace android
+diff --git a/libs/renderengine/skia/GLExtensions.h b/libs/renderengine/skia/GLExtensions.h
+deleted file mode 100644
+index 0cb1bda0df..0000000000
+--- a/libs/renderengine/skia/GLExtensions.h
++++ /dev/null
+@@ -1,88 +0,0 @@
+-/*
+- * Copyright (C) 2010 The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-#ifndef ANDROID_SF_GLEXTENSION_H
+-#define ANDROID_SF_GLEXTENSION_H
+-
+-#include <stdint.h>
+-#include <sys/types.h>
+-
+-#include <EGL/egl.h>
+-#include <EGL/eglext.h>
+-#include <GLES/gl.h>
+-#include <GLES/glext.h>
+-#include <utils/Singleton.h>
+-#include <utils/String8.h>
+-
+-namespace android {
+-namespace renderengine {
+-namespace skia {
+-
+-class GLExtensions : public Singleton<GLExtensions> {
+-public:
+-    bool hasNoConfigContext() const { return mHasNoConfigContext; }
+-    bool hasNativeFenceSync() const { return mHasNativeFenceSync; }
+-    bool hasFenceSync() const { return mHasFenceSync; }
+-    bool hasWaitSync() const { return mHasWaitSync; }
+-    bool hasProtectedContent() const { return mHasProtectedContent; }
+-    bool hasContextPriority() const { return mHasContextPriority; }
+-    bool hasSurfacelessContext() const { return mHasSurfacelessContext; }
+-    bool hasProtectedTexture() const { return mHasProtectedTexture; }
+-    bool hasRealtimePriority() const { return mHasRealtimePriority; }
+-
+-    void initWithGLStrings(GLubyte const* vendor, GLubyte const* renderer, GLubyte const* version,
+-                           GLubyte const* extensions);
+-    char const* getVendor() const;
+-    char const* getRenderer() const;
+-    char const* getVersion() const;
+-    char const* getExtensions() const;
+-
+-    void initWithEGLStrings(char const* eglVersion, char const* eglExtensions);
+-    char const* getEGLVersion() const;
+-    char const* getEGLExtensions() const;
+-
+-protected:
+-    GLExtensions() = default;
+-
+-private:
+-    friend class Singleton<GLExtensions>;
+-
+-    bool mHasNoConfigContext = false;
+-    bool mHasNativeFenceSync = false;
+-    bool mHasFenceSync = false;
+-    bool mHasWaitSync = false;
+-    bool mHasProtectedContent = false;
+-    bool mHasContextPriority = false;
+-    bool mHasSurfacelessContext = false;
+-    bool mHasProtectedTexture = false;
+-    bool mHasRealtimePriority = false;
+-
+-    String8 mVendor;
+-    String8 mRenderer;
+-    String8 mVersion;
+-    String8 mExtensions;
+-    String8 mEGLVersion;
+-    String8 mEGLExtensions;
+-
+-    GLExtensions(const GLExtensions&);
+-    GLExtensions& operator=(const GLExtensions&);
+-};
+-
+-} // namespace skia
+-} // namespace renderengine
+-} // namespace android
+-
+-#endif // ANDROID_SF_GLEXTENSION_H
+diff --git a/libs/renderengine/skia/SkiaGLRenderEngine.cpp b/libs/renderengine/skia/SkiaGLRenderEngine.cpp
+index d688b51793..eb096d0bce 100644
+--- a/libs/renderengine/skia/SkiaGLRenderEngine.cpp
++++ b/libs/renderengine/skia/SkiaGLRenderEngine.cpp
+@@ -38,26 +38,17 @@
+ #include <memory>
+ #include <numeric>
+ 
+-#include "GLExtensions.h"
++#include "../gl/GLExtensions.h"
+ #include "log/log_main.h"
+ 
++bool checkGlError(const char* op, int lineNumber);
++
+ namespace android {
+ namespace renderengine {
+ namespace skia {
+ 
+ using base::StringAppendF;
+ 
+-static bool checkGlError(const char* op, int lineNumber) {
+-    bool errorFound = false;
+-    GLint error = glGetError();
+-    while (error != GL_NO_ERROR) {
+-        errorFound = true;
+-        error = glGetError();
+-        ALOGV("after %s() (line # %d) glError (0x%x)\n", op, lineNumber, error);
+-    }
+-    return errorFound;
+-}
+-
+ static status_t selectConfigForAttribute(EGLDisplay dpy, EGLint const* attrs, EGLint attribute,
+                                          EGLint wanted, EGLConfig* outConfig) {
+     EGLint numConfigs = -1, n = 0;
+@@ -160,7 +151,7 @@ std::unique_ptr<SkiaGLRenderEngine> SkiaGLRenderEngine::create(
+         LOG_ALWAYS_FATAL("eglQueryString(EGL_EXTENSIONS) failed");
+     }
+ 
+-    auto& extensions = GLExtensions::getInstance();
++    auto& extensions = gl::GLExtensions::getInstance();
+     extensions.initWithEGLStrings(eglVersion, eglExtensions);
+ 
+     // The code assumes that ES2 or later is available if this extension is
+@@ -360,8 +351,8 @@ base::unique_fd SkiaGLRenderEngine::flushAndSubmit(GrDirectContext* grContext) {
+ }
+ 
+ bool SkiaGLRenderEngine::waitGpuFence(base::borrowed_fd fenceFd) {
+-    if (!GLExtensions::getInstance().hasNativeFenceSync() ||
+-        !GLExtensions::getInstance().hasWaitSync()) {
++    if (!gl::GLExtensions::getInstance().hasNativeFenceSync() ||
++        !gl::GLExtensions::getInstance().hasWaitSync()) {
+         return false;
+     }
+ 
+@@ -396,7 +387,7 @@ bool SkiaGLRenderEngine::waitGpuFence(base::borrowed_fd fenceFd) {
+ 
+ base::unique_fd SkiaGLRenderEngine::flush() {
+     ATRACE_CALL();
+-    if (!GLExtensions::getInstance().hasNativeFenceSync()) {
++    if (!gl::GLExtensions::getInstance().hasNativeFenceSync()) {
+         return base::unique_fd();
+     }
+ 
+@@ -487,13 +478,13 @@ EGLContext SkiaGLRenderEngine::createEglContext(EGLDisplay display, EGLConfig co
+ 
+ std::optional<RenderEngine::ContextPriority> SkiaGLRenderEngine::createContextPriority(
+         const RenderEngineCreationArgs& args) {
+-    if (!GLExtensions::getInstance().hasContextPriority()) {
++    if (!gl::GLExtensions::getInstance().hasContextPriority()) {
+         return std::nullopt;
+     }
+ 
+     switch (args.contextPriority) {
+         case RenderEngine::ContextPriority::REALTIME:
+-            if (GLExtensions::getInstance().hasRealtimePriority()) {
++            if (gl::GLExtensions::getInstance().hasRealtimePriority()) {
+                 return RenderEngine::ContextPriority::REALTIME;
+             } else {
+                 ALOGI("Realtime priority unsupported, degrading gracefully to high priority");
+@@ -537,7 +528,7 @@ int SkiaGLRenderEngine::getContextPriority() {
+ }
+ 
+ void SkiaGLRenderEngine::appendBackendSpecificInfoToDump(std::string& result) {
+-    const GLExtensions& extensions = GLExtensions::getInstance();
++    const gl::GLExtensions& extensions = gl::GLExtensions::getInstance();
+     StringAppendF(&result, "\n ------------RE GLES------------\n");
+     StringAppendF(&result, "EGL implementation : %s\n", extensions.getEGLVersion());
+     StringAppendF(&result, "%s\n", extensions.getEGLExtensions());
+diff --git a/libs/renderengine/skia/SkiaRenderEngine.h b/libs/renderengine/skia/SkiaRenderEngine.h
+index 011052102d..7b4a0a0af2 100644
+--- a/libs/renderengine/skia/SkiaRenderEngine.h
++++ b/libs/renderengine/skia/SkiaRenderEngine.h
+@@ -64,6 +64,7 @@ public:
+ 
+     std::future<void> primeCache() override final;
+     void cleanupPostRender() override final;
++    void cleanFramebufferCache() override final{ }
+     bool supportsBackgroundBlur() override final {
+         return mBlurFilter != nullptr;
+     }
+diff --git a/libs/renderengine/tests/RenderEngineThreadedTest.cpp b/libs/renderengine/tests/RenderEngineThreadedTest.cpp
+index 281a502b06..fe3a16d4bf 100644
+--- a/libs/renderengine/tests/RenderEngineThreadedTest.cpp
++++ b/libs/renderengine/tests/RenderEngineThreadedTest.cpp
+@@ -36,7 +36,7 @@ struct RenderEngineThreadedTest : public ::testing::Test {
+     void SetUp() override {
+         mThreadedRE = renderengine::threaded::RenderEngineThreaded::create(
+                 [this]() { return std::unique_ptr<renderengine::RenderEngine>(mRenderEngine); },
+-                renderengine::RenderEngine::RenderEngineType::SKIA_GL_THREADED);
++                renderengine::RenderEngine::RenderEngineType::THREADED);
+     }
+ 
+     std::unique_ptr<renderengine::threaded::RenderEngineThreaded> mThreadedRE;
+@@ -57,6 +57,18 @@ TEST_F(RenderEngineThreadedTest, primeCache) {
+     mThreadedRE->getContextPriority();
+ }
+ 
++TEST_F(RenderEngineThreadedTest, genTextures) {
++    uint32_t texName;
++    EXPECT_CALL(*mRenderEngine, genTextures(1, &texName));
++    mThreadedRE->genTextures(1, &texName);
++}
++
++TEST_F(RenderEngineThreadedTest, deleteTextures) {
++    uint32_t texName;
++    EXPECT_CALL(*mRenderEngine, deleteTextures(1, &texName));
++    mThreadedRE->deleteTextures(1, &texName);
++}
++
+ TEST_F(RenderEngineThreadedTest, getMaxTextureSize_returns20) {
+     size_t size = 20;
+     EXPECT_CALL(*mRenderEngine, getMaxTextureSize()).WillOnce(Return(size));
+diff --git a/libs/renderengine/threaded/RenderEngineThreaded.cpp b/libs/renderengine/threaded/RenderEngineThreaded.cpp
+index bf2f3fefce..528115d7f6 100644
+--- a/libs/renderengine/threaded/RenderEngineThreaded.cpp
++++ b/libs/renderengine/threaded/RenderEngineThreaded.cpp
+@@ -27,6 +27,8 @@
+ #include <processgroup/processgroup.h>
+ #include <utils/Trace.h>
+ 
++#include "gl/GLESRenderEngine.h"
++
+ using namespace std::chrono_literals;
+ 
+ namespace android {
+@@ -178,13 +180,41 @@ void RenderEngineThreaded::dump(std::string& result) {
+ void RenderEngineThreaded::genTextures(size_t count, uint32_t* names) {
+     ATRACE_CALL();
+     // This is a no-op in SkiaRenderEngine.
+-    return;
++    if (getRenderEngineType() != RenderEngineType::THREADED) {
++        return;
++    }
++    std::promise<void> resultPromise;
++    std::future<void> resultFuture = resultPromise.get_future();
++    {
++        std::lock_guard lock(mThreadMutex);
++        mFunctionCalls.push([&resultPromise, count, names](renderengine::RenderEngine& instance) {
++            ATRACE_NAME("REThreaded::genTextures");
++            instance.genTextures(count, names);
++            resultPromise.set_value();
++        });
++    }
++    mCondition.notify_one();
++    resultFuture.wait();
+ }
+ 
+ void RenderEngineThreaded::deleteTextures(size_t count, uint32_t const* names) {
+     ATRACE_CALL();
+     // This is a no-op in SkiaRenderEngine.
+-    return;
++    if (getRenderEngineType() != RenderEngineType::THREADED) {
++        return;
++    }
++    std::promise<void> resultPromise;
++    std::future<void> resultFuture = resultPromise.get_future();
++    {
++        std::lock_guard lock(mThreadMutex);
++        mFunctionCalls.push([&resultPromise, count, &names](renderengine::RenderEngine& instance) {
++            ATRACE_NAME("REThreaded::deleteTextures");
++            instance.deleteTextures(count, names);
++            resultPromise.set_value();
++        });
++    }
++    mCondition.notify_one();
++    resultFuture.wait();
+ }
+ 
+ void RenderEngineThreaded::mapExternalTextureBuffer(const sp<GraphicBuffer>& buffer,
+@@ -285,6 +315,20 @@ ftl::Future<FenceResult> RenderEngineThreaded::drawLayers(
+     return resultFuture;
+ }
+ 
++void RenderEngineThreaded::cleanFramebufferCache() {
++    ATRACE_CALL();
++    // This function is designed so it can run asynchronously, so we do not need to wait
++    // for the futures.
++    {
++        std::lock_guard lock(mThreadMutex);
++        mFunctionCalls.push([](renderengine::RenderEngine& instance) {
++            ATRACE_NAME("REThreaded::cleanFramebufferCache");
++            instance.cleanFramebufferCache();
++        });
++    }
++    mCondition.notify_one();
++}
++
+ int RenderEngineThreaded::getContextPriority() {
+     std::promise<int> resultPromise;
+     std::future<int> resultFuture = resultPromise.get_future();
+diff --git a/libs/renderengine/threaded/RenderEngineThreaded.h b/libs/renderengine/threaded/RenderEngineThreaded.h
+index 32c65c0365..4ba26bf926 100644
+--- a/libs/renderengine/threaded/RenderEngineThreaded.h
++++ b/libs/renderengine/threaded/RenderEngineThreaded.h
+@@ -60,6 +60,7 @@ public:
+                                         const bool useFramebufferCache,
+                                         base::unique_fd&& bufferFence) override;
+ 
++    void cleanFramebufferCache() override;
+     int getContextPriority() override;
+     bool supportsBackgroundBlur() override;
+     void onActiveDisplaySizeChanged(ui::Size size) override;
+diff --git a/services/surfaceflinger/Layer.h b/services/surfaceflinger/Layer.h
+index e9a63d91d2..126fcac464 100644
+--- a/services/surfaceflinger/Layer.h
++++ b/services/surfaceflinger/Layer.h
+@@ -23,6 +23,8 @@
+ #include <gui/WindowInfo.h>
+ #include <layerproto/LayerProtoHeader.h>
+ #include <math/vec4.h>
++#include <renderengine/Mesh.h>
++#include <renderengine/Texture.h>
+ #include <sys/types.h>
+ #include <ui/BlurRegion.h>
+ #include <ui/FloatRect.h>
+diff --git a/services/surfaceflinger/SurfaceFlinger.cpp b/services/surfaceflinger/SurfaceFlinger.cpp
+index a0c1b645c3..4215f00cb9 100644
+--- a/services/surfaceflinger/SurfaceFlinger.cpp
++++ b/services/surfaceflinger/SurfaceFlinger.cpp
+@@ -843,7 +843,11 @@ chooseRenderEngineTypeViaSysProp() {
+     char prop[PROPERTY_VALUE_MAX];
+     property_get(PROPERTY_DEBUG_RENDERENGINE_BACKEND, prop, "");
+ 
+-    if (strcmp(prop, "skiagl") == 0) {
++    if (strcmp(prop, "gles") == 0) {
++        return renderengine::RenderEngine::RenderEngineType::GLES;
++    } else if (strcmp(prop, "threaded") == 0) {
++        return renderengine::RenderEngine::RenderEngineType::THREADED;
++    } else if (strcmp(prop, "skiagl") == 0) {
+         return renderengine::RenderEngine::RenderEngineType::SKIA_GL;
+     } else if (strcmp(prop, "skiaglthreaded") == 0) {
+         return renderengine::RenderEngine::RenderEngineType::SKIA_GL_THREADED;
+@@ -3870,6 +3874,8 @@ void SurfaceFlinger::processDisplayChanged(const wp<IBinder>& displayToken,
+ 
+     // Recreate the DisplayDevice if the surface or sequence ID changed.
+     if (currentBinder != drawingBinder || currentState.sequenceId != drawingState.sequenceId) {
++        getRenderEngine().cleanFramebufferCache();
++
+         if (const auto display = getDisplayDeviceLocked(displayToken)) {
+             display->disconnect();
+             if (display->isVirtual()) {
+@@ -8420,7 +8426,7 @@ ftl::SharedFuture<FenceResult> SurfaceFlinger::renderScreenImpl(
+     const bool renderEngineIsThreaded = [&]() {
+         using Type = renderengine::RenderEngine::RenderEngineType;
+         const auto type = mRenderEngine->getRenderEngineType();
+-        return type == Type::SKIA_GL_THREADED;
++        return type == Type::THREADED || type == Type::SKIA_GL_THREADED;
+     }();
+     auto presentFuture = renderEngineIsThreaded ? ftl::defer(std::move(present)).share()
+                                                 : ftl::yield(present()).share();
+diff --git a/services/surfaceflinger/tests/unittests/CompositionTest.cpp b/services/surfaceflinger/tests/unittests/CompositionTest.cpp
+index 1bb3757653..bbe4aa0778 100644
+--- a/services/surfaceflinger/tests/unittests/CompositionTest.cpp
++++ b/services/surfaceflinger/tests/unittests/CompositionTest.cpp
+@@ -32,6 +32,8 @@
+ #include <gui/LayerMetadata.h>
+ #include <log/log.h>
+ #include <renderengine/mock/FakeExternalTexture.h>
++#include <renderengine/mock/Framebuffer.h>
++#include <renderengine/mock/Image.h>
+ #include <renderengine/mock/RenderEngine.h>
+ #include <system/window.h>
+ #include <utils/String8.h>
+-- 
+2.43.0
+

@@ -1,0 +1,63 @@
+From 105f8a07cf64cd4466d16f95882344a9efd6ee42 Mon Sep 17 00:00:00 2001
+From: Khalvat-M <mmba313@gmail.com>
+Date: Tue, 25 Oct 2022 07:15:01 +0330
+Subject: [PATCH 08/12] Revert "config: Remove
+ TARGET_CAMERA_BOOTTIME_TIMESTAMP"
+
+This reverts commit ed8e192818f89f04d6e18c8f97da35e1b166db3f.
+---
+ build/soong/Android.bp     | 17 +++++++++++++++++
+ config/BoardConfigSoong.mk |  2 ++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/build/soong/Android.bp b/build/soong/Android.bp
+index 01b6fcb4..a723a315 100644
+--- a/build/soong/Android.bp
++++ b/build/soong/Android.bp
+@@ -301,6 +301,23 @@ trust_usb_control {
+     },
+ }
+ 
++soong_config_module_type {
++    name: "needs_camera_boottime",
++    module_type: "cc_defaults",
++    config_namespace: "lineageGlobalVars",
++    bool_variables: ["needs_camera_boottime"],
++    properties: ["cppflags"],
++}
++
++needs_camera_boottime {
++    name: "needs_camera_boottime_defaults",
++    soong_config_variables: {
++        needs_camera_boottime: {
++            cppflags: ["-DTARGET_CAMERA_BOOTTIME_TIMESTAMP"],
++        },
++    },
++}
++
+ soong_config_module_type {
+     name: "needs_netd_direct_connect_rule",
+     module_type: "cc_defaults",
+diff --git a/config/BoardConfigSoong.mk b/config/BoardConfigSoong.mk
+index 6904cc77..b47d918d 100644
+--- a/config/BoardConfigSoong.mk
++++ b/config/BoardConfigSoong.mk
+@@ -37,6 +37,7 @@ SOONG_CONFIG_lineageGlobalVars += \
+     gralloc_handle_has_reserved_size \
+     has_legacy_camera_hal1 \
+     has_memfd_backport \
++    needs_camera_boottime \
+     needs_netd_direct_connect_rule \
+     target_health_charging_control_charging_path \
+     target_health_charging_control_charging_enabled \
+@@ -82,6 +83,7 @@ SOONG_CONFIG_lineageGlobalVars_gralloc_handle_has_reserved_size := $(TARGET_GRAL
+ SOONG_CONFIG_lineageGlobalVars_gralloc_handle_has_ubwcp_format := $(TARGET_GRALLOC_HANDLE_HAS_UBWCP_FORMAT)
+ SOONG_CONFIG_lineageGlobalVars_has_legacy_camera_hal1 := $(TARGET_HAS_LEGACY_CAMERA_HAL1)
+ SOONG_CONFIG_lineageGlobalVars_has_memfd_backport := $(TARGET_HAS_MEMFD_BACKPORT)
++SOONG_CONFIG_lineageGlobalVars_needs_camera_boottime := $(TARGET_CAMERA_BOOTTIME_TIMESTAMP)
+ SOONG_CONFIG_lineageGlobalVars_needs_netd_direct_connect_rule := $(TARGET_NEEDS_NETD_DIRECT_CONNECT_RULE)
+ SOONG_CONFIG_lineageGlobalVars_uses_egl_display_array := $(TARGET_USES_EGL_DISPLAY_ARRAY)
+ SOONG_CONFIG_lineageNvidiaVars_uses_nvidia_enhancements := $(NV_ANDROID_FRAMEWORK_ENHANCEMENTS)
+-- 
+2.43.0
+

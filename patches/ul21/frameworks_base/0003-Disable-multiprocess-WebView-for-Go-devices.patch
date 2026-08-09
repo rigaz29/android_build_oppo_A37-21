@@ -1,0 +1,32 @@
+From b44bd029f8198483435b493b15b9a4141c72a629 Mon Sep 17 00:00:00 2001
+From: Yaroslav Zviezda <acroreiser@gmail.com>
+Date: Wed, 12 Jul 2023 23:34:39 +0300
+Subject: [PATCH 03/23] Disable multiprocess WebView for Go devices
+
+This will save some memory.
+
+This reverts commit 2bdf647b7d9412d7622b843234b38b7189702b35.
+---
+ .../core/java/com/android/server/webkit/SystemImpl.java     | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/services/core/java/com/android/server/webkit/SystemImpl.java b/services/core/java/com/android/server/webkit/SystemImpl.java
+index 5d6d07a7f5aa..b1da4bb9c8ff 100644
+--- a/services/core/java/com/android/server/webkit/SystemImpl.java
++++ b/services/core/java/com/android/server/webkit/SystemImpl.java
+@@ -294,8 +294,10 @@ public class SystemImpl implements SystemInterface {
+ 
+     @Override
+     public boolean isMultiProcessDefaultEnabled() {
+-        // Multiprocess is enabled by default for all devices.
+-        return true;
++        // Multiprocess is enabled for all 64-bit devices, since the ability to run the renderer
++        // process in 32-bit when it's a separate process typically results in a net memory saving.
++        // Multiprocess is also enabled for 32-bit devices unless they report they are "low ram".
++        return Build.SUPPORTED_64_BIT_ABIS.length > 0 || !ActivityManager.isLowRamDeviceStatic();
+     }
+ 
+     @Override
+-- 
+2.43.0
+

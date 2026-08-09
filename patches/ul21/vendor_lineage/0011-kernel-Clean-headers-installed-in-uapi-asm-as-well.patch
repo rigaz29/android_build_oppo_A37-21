@@ -1,0 +1,27 @@
+From 001be43323c5a2830ab0e9c77b5fcd3bbbb45165 Mon Sep 17 00:00:00 2001
+From: khalvat-M <mmba313@gmail.com>
+Date: Sun, 24 Mar 2024 03:46:23 +0330
+Subject: [PATCH 11/12] kernel: Clean headers installed in uapi/asm as well
+
+* Unlike on ARM64, devices building ARM32 installs the signal.h to
+  uapi/asm. Include this possible variation to workaround conflicts
+  with bionic.
+
+Change-Id: If8e334dfadb544ac3d4256f6738780c797b6cccc
+---
+ tools/clean_headers.sh | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tools/clean_headers.sh b/tools/clean_headers.sh
+index 627f6466..44053a31 100755
+--- a/tools/clean_headers.sh
++++ b/tools/clean_headers.sh
+@@ -4,4 +4,5 @@ set -eu
+ export ANDROID_BUILD_TOP="$PWD"
+ 
+ ./bionic/libc/kernel/tools/clean_header.py -u \
++    "$1/usr/include/asm/signal.h" \
+     "$1/usr/include/asm-generic/signal.h"
+-- 
+2.43.0
+

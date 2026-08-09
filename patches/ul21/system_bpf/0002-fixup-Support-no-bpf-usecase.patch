@@ -1,0 +1,38 @@
+From 4fab873549bba853371f90e16326531a618d164f Mon Sep 17 00:00:00 2001
+From: khalvat-M <mmba313@gmail.com>
+Date: Tue, 16 Apr 2024 13:15:01 +0330
+Subject: [PATCH 2/2] fixup:Support no-bpf usecase
+
+---
+ bpfloader/BpfLoader.cpp | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/bpfloader/BpfLoader.cpp b/bpfloader/BpfLoader.cpp
+index 8c44db3..122aace 100644
+--- a/bpfloader/BpfLoader.cpp
++++ b/bpfloader/BpfLoader.cpp
+@@ -191,6 +191,24 @@ int main(int argc, char** argv) {
+     (void)argc;
+     android::base::InitLogging(argv, &android::base::KernelLogger);
+ 
++    // Linux 5.16-rc1 changed the default to 2 (disabled but changeable), but we need 0 (enabled)
++    // (this writeFile is known to fail on at least 4.19, but always defaults to 0 on pre-5.13,
++    // on 5.13+ it depends on CONFIG_BPF_UNPRIV_DEFAULT_OFF)
++    writeProcSysFile("/proc/sys/kernel/unprivileged_bpf_disabled", "0\n");
++
++    // Enable the eBPF JIT -- but do note that on 64-bit kernels it is likely
++    // already force enabled by the kernel config option BPF_JIT_ALWAYS_ON.
++    // (Note: this (open) will fail with ENOENT 'No such file or directory' if
++    //  kernel does not have CONFIG_BPF_JIT=y)
++    // BPF_JIT is required by R VINTF (which means 4.14/4.19/5.4 kernels),
++    // but 4.14/4.19 were released with P & Q, and only 5.4 is new in R+.
++    writeProcSysFile("/proc/sys/net/core/bpf_jit_enable", "1\n");
++
++    // Enable JIT kallsyms export for privileged users only
++    // (Note: this (open) will fail with ENOENT 'No such file or directory' if
++    //  kernel does not have CONFIG_HAVE_EBPF_JIT=y)
++    writeProcSysFile("/proc/sys/net/core/bpf_jit_kallsyms", "1\n");
++
+     // Create all the pin subdirectories
+     // (this must be done first to allow selinux_context and pin_subdir functionality,
+     //  which could otherwise fail with ENOENT during object pinning or renaming,

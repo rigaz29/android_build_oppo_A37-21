@@ -1,0 +1,89 @@
+From bac4d0cf3a57a5167bfb1716d8620cdb4b31ca71 Mon Sep 17 00:00:00 2001
+From: TARKZiM <tom8476oo@gmail.com>
+Date: Wed, 7 Feb 2024 11:37:24 +0800
+Subject: [PATCH 5/6] camera: Add 32-bit only version of cameraserver
+
+---
+ camera/cameraserver/Android.bp         | 45 ++++++++++++++++++++++++++
+ camera/cameraserver/cameraserver_32.rc |  9 ++++++
+ 2 files changed, 54 insertions(+)
+ create mode 100644 camera/cameraserver/cameraserver_32.rc
+
+diff --git a/camera/cameraserver/Android.bp b/camera/cameraserver/Android.bp
+index 6862cb156b..791ea822b0 100644
+--- a/camera/cameraserver/Android.bp
++++ b/camera/cameraserver/Android.bp
+@@ -46,6 +46,7 @@ cc_binary {
+         "android.hardware.camera.common@1.0",
+         "android.hardware.camera.device@1.0",
+         "android.hardware.camera.device@3.2",
++        "android.hardware.camera.device@3.3",
+         "android.hardware.camera.device@3.4",
+     ],
+     static_libs: [
+@@ -65,3 +66,47 @@ cc_binary {
+         "manifest_android.frameworks.cameraservice.service.xml",
+     ],
+ }
++
++cc_binary {
++    name: "cameraserver_32",
++
++    srcs: ["main_cameraserver.cpp"],
++
++    defaults: [
++        "libcameraservice_deps",
++    ],
++
++    header_libs: [
++        "libmedia_headers",
++    ],
++
++    shared_libs: [
++        "liblog",
++        "libutils",
++        "libui",
++        "libgui",
++        "libbinder",
++        "libbinder_ndk",
++        "libhidlbase",
++        "android.hardware.camera.common@1.0",
++        "android.hardware.camera.device@1.0",
++        "android.hardware.camera.device@3.2",
++        "android.hardware.camera.device@3.4",
++    ],
++    static_libs: [
++        "libcameraservice",
++    ],
++    compile_multilib: "32",
++    cflags: [
++        "-Wall",
++        "-Wextra",
++        "-Werror",
++        "-Wno-unused-parameter",
++    ],
++
++    init_rc: ["cameraserver_32.rc"],
++
++    vintf_fragments: [
++        "manifest_android.frameworks.cameraservice.service.xml",
++    ],
++}
+diff --git a/camera/cameraserver/cameraserver_32.rc b/camera/cameraserver/cameraserver_32.rc
+new file mode 100644
+index 0000000000..2fd9294e15
+--- /dev/null
++++ b/camera/cameraserver/cameraserver_32.rc
+@@ -0,0 +1,9 @@
++service cameraserver /system/bin/cameraserver_32
++    class main
++    user cameraserver
++    group audio camera input drmrpc
++    ioprio rt 4
++    task_profiles CameraServiceCapacity MaxPerformance
++    rlimit rtprio 10 10
++    onrestart class_restart cameraWatchdog
++    interface aidl android.frameworks.cameraservice.service.ICameraService/default
+-- 
+2.43.0
+

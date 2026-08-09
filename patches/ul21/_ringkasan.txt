@@ -1,0 +1,13 @@
+art	1
+system_bpf	2
+vendor_lineage	12
+system_core	5
+system_netd	4
+packages_modules_Connectivity	15
+system_sepolicy	4
+device_lineage_sepolicy	4
+hardware_interfaces	4
+frameworks_native	15
+packages_modules_Bluetooth	4
+frameworks_av	6
+frameworks_base	23

@@ -1,0 +1,63 @@
+From 1e6214d01809e1b216d906a222e8c103347ad507 Mon Sep 17 00:00:00 2001
+From: Khalvat-M <mmba313@gmail.com>
+Date: Tue, 25 Oct 2022 06:44:08 +0330
+Subject: [PATCH 03/12] Revert "config: Remove
+ TARGET_NEEDS_NETD_DIRECT_CONNECT_RULE"
+
+This reverts commit 3bff07a50650798c40519dc84fa6eb78e23ba8c3.
+---
+ build/soong/Android.bp     | 17 +++++++++++++++++
+ config/BoardConfigSoong.mk |  2 ++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/build/soong/Android.bp b/build/soong/Android.bp
+index addbee93..d9878f2d 100644
+--- a/build/soong/Android.bp
++++ b/build/soong/Android.bp
+@@ -301,6 +301,23 @@ trust_usb_control {
+     },
+ }
+ 
++soong_config_module_type {
++    name: "needs_netd_direct_connect_rule",
++    module_type: "cc_defaults",
++    config_namespace: "lineageGlobalVars",
++    bool_variables: ["needs_netd_direct_connect_rule"],
++    properties: ["cppflags"],
++}
++
++needs_netd_direct_connect_rule {
++    name: "needs_netd_direct_connect_rule_defaults",
++    soong_config_variables: {
++        needs_netd_direct_connect_rule: {
++            cppflags: ["-DNEEDS_NETD_DIRECT_CONNECT_RULE"],
++        },
++    },
++}
++
+ soong_config_module_type {
+     name: "bootloader_message_offset",
+     module_type: "cc_defaults",
+diff --git a/config/BoardConfigSoong.mk b/config/BoardConfigSoong.mk
+index aa821a57..a03cb1d4 100644
+--- a/config/BoardConfigSoong.mk
++++ b/config/BoardConfigSoong.mk
+@@ -35,6 +35,7 @@ SOONG_CONFIG_lineageGlobalVars += \
+     gralloc_handle_has_custom_content_md_reserved_size \
+     disable_postrender_cleanup \
+     gralloc_handle_has_reserved_size \
++    needs_netd_direct_connect_rule \
+     target_health_charging_control_charging_path \
+     target_health_charging_control_charging_enabled \
+     target_health_charging_control_charging_disabled \
+@@ -75,6 +76,7 @@ SOONG_CONFIG_lineageGlobalVars_gralloc_handle_has_custom_content_md_reserved_siz
+ SOONG_CONFIG_lineageGlobalVars_disable_postrender_cleanup := $(TARGET_DISABLE_POSTRENDER_CLEANUP)
+ SOONG_CONFIG_lineageGlobalVars_gralloc_handle_has_reserved_size := $(TARGET_GRALLOC_HANDLE_HAS_RESERVED_SIZE)
+ SOONG_CONFIG_lineageGlobalVars_gralloc_handle_has_ubwcp_format := $(TARGET_GRALLOC_HANDLE_HAS_UBWCP_FORMAT)
++SOONG_CONFIG_lineageGlobalVars_needs_netd_direct_connect_rule := $(TARGET_NEEDS_NETD_DIRECT_CONNECT_RULE)
+ SOONG_CONFIG_lineageGlobalVars_uses_egl_display_array := $(TARGET_USES_EGL_DISPLAY_ARRAY)
+ SOONG_CONFIG_lineageNvidiaVars_uses_nvidia_enhancements := $(NV_ANDROID_FRAMEWORK_ENHANCEMENTS)
+ SOONG_CONFIG_lineageQcomVars_qti_vibrator_use_effect_stream := $(TARGET_QTI_VIBRATOR_USE_EFFECT_STREAM)
+-- 
+2.43.0
+

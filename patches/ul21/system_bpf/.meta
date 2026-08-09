@@ -1,0 +1,8 @@
+repo: system_bpf
+ul-head: b2cb02bf18bc7c4f6336e552661c701ffa9e8151
+ul-head-tanggal: 2024-06-23
+official-head: d5e515c0085b354fb8f00ef3feb09ec0f0b1f60b
+merge-base: d5e515c0085b354fb8f00ef3feb09ec0f0b1f60b
+merge-base-tanggal: 2024-06-15
+jumlah-patch: 2
+tanggal-ekstraksi: 2026-08-09T11:32:53Z

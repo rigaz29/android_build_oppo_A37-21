@@ -1,0 +1,42 @@
+From b7aa4c378832d879750f2abcb7eae9341c512e5a Mon Sep 17 00:00:00 2001
+From: Yaroslav Zviezda <acroreiser@gmail.com>
+Date: Wed, 29 Nov 2023 23:47:40 +0300
+Subject: [PATCH 3/4] Revert "remove inprocess tethering"
+
+This reverts commit b1f847eebd614a1ac7821583b240a4fd6f0a7462.
+---
+ apex/Android.bp                                    | 7 +++++++
+ apex/com.android.tethering.inprocess-file_contexts | 3 +++
+ 2 files changed, 10 insertions(+)
+ create mode 100644 apex/com.android.tethering.inprocess-file_contexts
+
+diff --git a/apex/Android.bp b/apex/Android.bp
+index 04fd5f6eb..374cacf64 100644
+--- a/apex/Android.bp
++++ b/apex/Android.bp
+@@ -232,6 +232,13 @@ filegroup {
+   ],
+ }
+ 
++filegroup {
++  name: "com.android.tethering.inprocess-file_contexts",
++  srcs: [
++    "com.android.tethering.inprocess-file_contexts",
++  ],
++}
++
+ filegroup {
+   name: "com.android.extservices-file_contexts",
+   srcs: [
+diff --git a/apex/com.android.tethering.inprocess-file_contexts b/apex/com.android.tethering.inprocess-file_contexts
+new file mode 100644
+index 000000000..af366d83e
+--- /dev/null
++++ b/apex/com.android.tethering.inprocess-file_contexts
+@@ -0,0 +1,3 @@
++(/.*)?                  u:object_r:system_file:s0
++/bin/for-system/clatd   u:object_r:clatd_exec:s0
++/lib(64)?(/.*)          u:object_r:system_lib_file:s0
+-- 
+2.43.0
+

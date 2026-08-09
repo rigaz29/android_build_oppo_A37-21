@@ -1,0 +1,103 @@
+From 3dcb1ecf371d8599c327bcc49b7b060fa5111788 Mon Sep 17 00:00:00 2001
+From: flintman <flintman@flintmancomputers.com>
+Date: Sat, 21 Nov 2015 20:51:06 -0500
+Subject: [PATCH 17/23] sensors: Create bool to select what timestamp to use
+
+Older devices may have an issue with rotation freezes up and
+requires a reboot to fix. In deep sleep the sensor's timestamp
+is far off, depending how long it's in sleep, causing rotation
+not to work. onSensorChanged if true it will use
+SystemClock.elapsedRealtimeNanos() instead of event.timestamp.
+Possibly an update to the custom sensor libs.
+
+Change-Id: Ie456e12cb65fbb921cb780112df301655b93b14f
+---
+ core/res/res/values/lineage_config.xml         | 18 ++++++++++++++++++
+ core/res/res/values/lineage_symbols.xml        | 17 +++++++++++++++++
+ .../server/wm/WindowOrientationListener.java   |  7 ++++++-
+ 3 files changed, 41 insertions(+), 1 deletion(-)
+ create mode 100644 core/res/res/values/lineage_config.xml
+ create mode 100644 core/res/res/values/lineage_symbols.xml
+
+diff --git a/core/res/res/values/lineage_config.xml b/core/res/res/values/lineage_config.xml
+new file mode 100644
+index 000000000000..24d2f87a2a9d
+--- /dev/null
++++ b/core/res/res/values/lineage_config.xml
+@@ -0,0 +1,18 @@
++<!--
++     Copyright (C) 2012-2015 The CyanogenMod Project
++     Copyright (C) 2017-2020 The LineageOS Project
++     Licensed under the Apache License, Version 2.0 (the "License");
++     you may not use this file except in compliance with the License.
++     You may obtain a copy of the License at
++          http://www.apache.org/licenses/LICENSE-2.0
++     Unless required by applicable law or agreed to in writing, software
++     distributed under the License is distributed on an "AS IS" BASIS,
++     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++     See the License for the specific language governing permissions and
++     limitations under the License.
++-->
++<resources>
++    <!-- Older rotation sensors are not setting event.timestamp correctly. Setting to
++         true will use SystemClock.elapsedRealtimeNanos() to set timestamp. -->
++    <bool name="config_useSystemClockforRotationSensor">false</bool>
++</resources>
+diff --git a/core/res/res/values/lineage_symbols.xml b/core/res/res/values/lineage_symbols.xml
+new file mode 100644
+index 000000000000..b0bcb598b06f
+--- /dev/null
++++ b/core/res/res/values/lineage_symbols.xml
+@@ -0,0 +1,17 @@
++<!--
++     Copyright (C) 2012-2015 The CyanogenMod Project
++     Copyright (C) 2017-2020 The LineageOS Project
++     Licensed under the Apache License, Version 2.0 (the "License");
++     you may not use this file except in compliance with the License.
++     You may obtain a copy of the License at
++          http://www.apache.org/licenses/LICENSE-2.0
++     Unless required by applicable law or agreed to in writing, software
++     distributed under the License is distributed on an "AS IS" BASIS,
++     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++     See the License for the specific language governing permissions and
++     limitations under the License.
++-->
++<resources>
++    <!-- Rotation sensor -->
++    <java-symbol type="bool" name="config_useSystemClockforRotationSensor" />
++</resources>
+diff --git a/services/core/java/com/android/server/wm/WindowOrientationListener.java b/services/core/java/com/android/server/wm/WindowOrientationListener.java
+index 14c816db0dbb..933006943423 100644
+--- a/services/core/java/com/android/server/wm/WindowOrientationListener.java
++++ b/services/core/java/com/android/server/wm/WindowOrientationListener.java
+@@ -75,6 +75,7 @@ public abstract class WindowOrientationListener {
+     private boolean mEnabled;
+     private int mRate;
+     private String mSensorType;
++    private boolean mUseSystemClockforRotationSensor;
+     private Sensor mSensor;
+ 
+     @VisibleForTesting
+@@ -146,6 +147,9 @@ public abstract class WindowOrientationListener {
+             mSensor = nonWakeUpDeviceOrientationSensor;
+         }
+ 
++        mUseSystemClockforRotationSensor = context.getResources().getBoolean(
++                com.android.internal.R.bool.config_useSystemClockforRotationSensor);
++
+         if (mSensor != null) {
+             mOrientationJudge = new OrientationSensorJudge();
+         }
+@@ -705,7 +709,8 @@ public abstract class WindowOrientationListener {
+                 // Reset the orientation listener state if the samples are too far apart in time
+                 // or when we see values of (0, 0, 0) which indicates that we polled the
+                 // accelerometer too soon after turning it on and we don't have any data yet.
+-                final long now = event.timestamp;
++                final long now = mUseSystemClockforRotationSensor
++                        ? SystemClock.elapsedRealtimeNanos() : event.timestamp;
+                 final long then = mLastFilteredTimestampNanos;
+                 final float timeDeltaMS = (now - then) * 0.000001f;
+                 final boolean skipSample;
+-- 
+2.43.0
+
