@@ -697,6 +697,60 @@ SELinux tetap **permissive**; enforcing bukan bagian fase ini.
 
 ---
 
+### Fase 6 — vendor blobs (9 Agustus 2026): NOL perubahan diperlukan
+
+Kriteria selesai: set 320 blob dipertahankan, dan tidak ada dependensi blob yang hilang
+karena perpindahan ke Android 14. **Tercapai — tanpa mengubah satu baris pun.**
+
+Metodenya bukan membaca daftar, tapi mengukur: `DT_NEEDED` diekstrak dari **seluruh 284
+berkas `.so`** di `vendor/oppo/A37/proprietary/`, menghasilkan **162 soname unik**, lalu
+disilangkan dengan himpunan pustaka yang akan dipasang LOS 21 (diambil dari berkas ninja
+hasil build, bukan dari perkiraan).
+
+**Hasil: 5 soname tidak disediakan LOS 21 — dan kelimanya juga TIDAK ADA di ROM 20 yang
+berjalan.** Jadi nol regresi.
+
+| Soname hilang | Pemakainya | Status |
+|---|---|---|
+| `libmmsw_detail_enhancement`, `libmmsw_math`, `libmmsw_opencl`, `libmmsw_platform` | `lib/libvpplibrary.so` | dorman — juga hilang di 20 |
+| `libvcel` | `vendor/lib/lib-imsvt.so` | dorman — juga hilang di 20 |
+
+Keduanya berarti `libvpplibrary.so` (video post-processing) dan `lib-imsvt.so` (IMS video
+telephony) **tidak mungkin di-dlopen** — sama seperti di LOS 20, di mana ROM tetap boot dan
+berfungsi. Kandidat pembersihan, bukan pemblokir; membuangnya menuntut commit baru di repo
+vendor dan re-pin manifest, untuk berkas yang efek runtimenya nol.
+
+**Koreksi terhadap pengukuran saya sendiri.** Dua putaran pertama melaporkan 11 lalu 10
+soname hilang. Keduanya **terlalu besar**: pola grep saya hanya mencakup `system/lib` dan
+`system/vendor/lib`, sehingga melewatkan pustaka di APEX dan `system_ext`. Lima yang gugur
+setelah dicek per nama modul:
+
+```
+android.hardware.bluetooth@1.0   DIBANGUN     <- sempat dikira hilang; ada di APEX btservices
+android.hardware.drm@1.0         DIBANGUN (403 rujukan)
+android.hardware.drm@1.1         DIBANGUN (286 rujukan)
+android.hidl.memory@1.0          DIBANGUN (713 rujukan)
+android.hidl.base@1.0            DIBANGUN (12 rujukan)   <- dari hardware/lineage/compat
+libnativehelper                  DIBANGUN     <- di APEX com.android.art
+```
+
+Pelajarannya: untuk pertanyaan "apakah pustaka ini ada", mencocokkan **nama modul** jauh
+lebih andal daripada mencocokkan jalur instalasi — A14 menaruh banyak pustaka di dalam APEX.
+
+**Tiga blob yang memang mati, dan itu memang sudah diketahui:**
+`libwvhidl.so` (butuh `drm@1.0/@1.1` + `hidl.memory@1.0`) sudah tercatat gagal sejak proyek
+20, dan `libwvdrmengine.so` sudah dibuang di vendor `2e5c6f7`. Blob `vendor.qti.hardware.iop@*`
+juga dorman sejak LOS 20 — dinyatakan eksplisit di `manifest.xml`.
+
+**Pemeriksaan lain yang lolos:**
+
+```
+entri PRODUCT_COPY_FILES menunjuk berkas tak ada   0 dari 320
+m <8 modul prebuilt Soong vendor/oppo>             rc=0
+```
+
+---
+
 ## 7. Risiko yang diakui
 
 | Risiko | Dampak | Mitigasi |
