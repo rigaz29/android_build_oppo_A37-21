@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verifikasi ROM LOS 20 A37 SEBELUM di-flash.
+# Verifikasi ROM LOS 21 A37 SEBELUM di-flash.
 #
 # Memeriksa hal-hal yang kalau salah baru ketahuan sebagai "stuck di logo OPPO" —
 # yaitu persis cara percobaan 19.1 lama gagal tanpa bisa didiagnosis.
@@ -40,7 +40,7 @@ if [ -n "$BPS" ]; then
         if [ "$got" = "$want" ]; then ok "$key=$got"
         else bad "$key='$got', diharapkan '$want' — $why"; fi
     }
-    check_prop ro.build.version.sdk 33            "LOS 20 itu Android 13, bukan 12L"
+    check_prop ro.build.version.sdk 34            "LOS 21 itu Android 14"
     check_prop ro.kernel.ebpf.supported false     "gerbang W1/W2; tanpa false, bpfloader menggagalkan boot"
     check_prop ro.config.low_ram true             "perangkat 2 GB, sama dengan ROM referensi"
     check_prop external_storage.casefold.enabled 0 "ext4 kernel 3.10 tidak punya casefold"
@@ -82,8 +82,13 @@ fi
 # (out/.../root/sepolicy), bukan di root system.img — sama seperti 19.1.
 # Yang dibandingkan dengan ROM gt58wifi: keberadaan monolitik + *.cil.
 inf "lokasi sepolicy"
-[ -f "$OUT/root/sepolicy" ] && ok "/sepolicy monolitik di ramdisk (root/sepolicy)" \
-    || bad "/sepolicy tidak ada di root/ (ramdisk)"
+# LOS 21: /sepolicy MONOLITIK TIDAK LAGI DIHARAPKAN. Android 14 memuat policy
+# lewat jalur split: system/core/init/selinux.cpp:37-48 mencari
+# /vendor/etc/selinux/precompiled_sepolicy dulu, dan bila hash tidak cocok
+# barulah mengompilasi CIL saat boot. Monolitik hanya artefak legacy — ROM LOS
+# 20 kita memang masih punya, build 21 tidak, dan itu benar.
+[ -f "$OUT/root/sepolicy" ] && inf "catatan: /sepolicy monolitik ada (tidak wajib di 21)" \
+    || ok "/sepolicy monolitik absen — sesuai jalur split A14"
 [ -f "$OUT/system/etc/selinux/plat_sepolicy.cil" ] && [ -f "$OUT/system/etc/selinux/plat_sepolicy_and_mapping.sha256" ] \
     && ok "system/etc/selinux berisi plat_sepolicy.cil + mapping" \
     || bad "system/etc/selinux tidak lengkap (lihat PLAN §5.3 / ref/evidence/selinux-list/)"
@@ -105,7 +110,8 @@ inf "lokasi sepolicy"
 count_in() { grep -cF -- "$2" < <(strings -a "$1") 2>/dev/null || true; }
 
 inf "adbd legacy FunctionFS (Gerrit 326385)"
-ADBD=$(find "$OUT/system" -name adbd -type f 2>/dev/null | head -1)
+# LOS 21: adbd hidup di APEX com.android.adbd, bukan /system/bin.
+ADBD=$(find "$OUT/apex" "$OUT/system" -name adbd -type f 2>/dev/null | head -1)
 if [ -z "$ADBD" ]; then
     bad "adbd tidak ditemukan di image"
 else
@@ -139,7 +145,7 @@ fi
 
 # --------------------------------------------------------------------- zip ---
 inf "paket"
-ZIP=$(ls -t "$OUT"/lineage-20.0-*.zip 2>/dev/null | head -1)
+ZIP=$(ls -t "$OUT"/lineage-21.0-*.zip 2>/dev/null | head -1)
 if [ -n "$ZIP" ]; then
     ok "$(basename "$ZIP") ($(du -h "$ZIP" | cut -f1))"
     case "$(basename "$ZIP")" in

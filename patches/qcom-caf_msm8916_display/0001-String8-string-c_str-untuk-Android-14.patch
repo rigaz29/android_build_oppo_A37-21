@@ -1,0 +1,66 @@
+From debce5fafe3cd0ab1b554e161ade70936e099f6a Mon Sep 17 00:00:00 2001
+From: rigaz29 <ryanbagas27@gmail.com>
+Date: Sun, 9 Aug 2026 09:28:27 +0000
+Subject: [PATCH] String8::string() -> c_str() untuk Android 14
+
+String8::string() jadi anggota privat di A14; seluruh pemakaian di repo ini
+diganti c_str(). Sama persis dengan perubahan di frameworks/av dan di device
+tree A37.
+
+Branch lineage-21.0-caf-msm8916 ternyata BELUM disesuaikan untuk A14 meski
+namanya 21.0 -- persis peringatan yang dicatat di A37-21.xml: nama branch bukan
+jaminan isi.
+---
+ libhwcomposer/hwc.cpp             | 2 +-
+ libhwcomposer/hwc_dump_layers.cpp | 4 ++--
+ libhwcomposer/hwc_mdpcomp.cpp     | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/libhwcomposer/hwc.cpp b/libhwcomposer/hwc.cpp
+index e0c7f97..ad70b67 100644
+--- a/libhwcomposer/hwc.cpp
++++ b/libhwcomposer/hwc.cpp
+@@ -911,7 +911,7 @@ void hwc_dump(struct hwc_composer_device_1* dev, char *buff, int buff_len)
+         ovDump[0] = '\0';
+     }
+     dumpsys_log(aBuf, "Copybit::isAbcInUse=%d\n\n",isAbcInUse(ctx) ? 1 : 0);
+-    strlcpy(buff, aBuf.string(), buff_len);
++    strlcpy(buff, aBuf.c_str(), buff_len);
+ }
+ 
+ int hwc_getActiveConfig(struct hwc_composer_device_1* dev, int disp) {
+diff --git a/libhwcomposer/hwc_dump_layers.cpp b/libhwcomposer/hwc_dump_layers.cpp
+index 39427e7..4c8f7a3 100644
+--- a/libhwcomposer/hwc_dump_layers.cpp
++++ b/libhwcomposer/hwc_dump_layers.cpp
+@@ -209,7 +209,7 @@ void HwcDebug::logHwcProps(uint32_t listFlags)
+                 "[???]": "");
+     }
+     ALOGI("Display[%s] Layer[*] %s-HwcModuleCompType, %d-layer MdpComp %s",
+-         mDisplayName, hwcModuleCompTypeLog.string(), sMdpCompMaxLayers,
++         mDisplayName, hwcModuleCompTypeLog.c_str(), sMdpCompMaxLayers,
+         (listFlags & HWC_GEOMETRY_CHANGED)? "[HwcList Geometry Changed]": "");
+ }
+ 
+@@ -250,7 +250,7 @@ void HwcDebug::logLayer(size_t layerIndex, hwc_layer_1_t hwLayers[])
+         sourceCrop.right, sourceCrop.bottom,
+         displayFrame.left, displayFrame.top,
+         displayFrame.right, displayFrame.bottom,
+-        hwcVisRegsScrLog.string());
++        hwcVisRegsScrLog.c_str());
+     // Log Line 2
+     ALOGI("Display[%s] Layer[%zu] LayerCompType = %s, Format = %s, "
+         "Orientation = %s, Flags = %s%s%s, Hints = %s%s%s, "
+diff --git a/libhwcomposer/hwc_mdpcomp.cpp b/libhwcomposer/hwc_mdpcomp.cpp
+index 8fe45b2..f243866 100644
+--- a/libhwcomposer/hwc_mdpcomp.cpp
++++ b/libhwcomposer/hwc_mdpcomp.cpp
+@@ -2111,7 +2111,7 @@ int MDPComp::prepare(hwc_context_t *ctx, hwc_display_contents_1_t* list) {
+                 (list->flags & HWC_GEOMETRY_CHANGED));
+         android::String8 sDump("");
+         dump(sDump, ctx);
+-        ALOGD("%s",sDump.string());
++        ALOGD("%s",sDump.c_str());
+     }
+ 
+ #ifdef DYNAMIC_FPS

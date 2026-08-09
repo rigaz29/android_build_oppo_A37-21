@@ -70,7 +70,61 @@ else
     else git -C frameworks/native am --abort >/dev/null 2>&1; no "renderengine: git am GAGAL -- selesaikan manual"; rc=1; fi
 fi
 
-# --- 4. penjaga regresi ----------------------------------------------------
+# --- 4. seri patch hardware/qcom-caf/msm8916 (String8 -> c_str untuk A14) ---
+# Branch lineage-21.0-caf-msm8916 milik UL BELUM disesuaikan untuk Android 14
+# meski namanya 21.0 -- persis peringatan yang dicatat di A37-21.xml ("nama
+# branch bukan jaminan isi"). String8::string() jadi anggota privat di A14,
+# dan repo audio (11 titik) + display (4 titik) masih memakainya, sehingga
+# audio.primary.msm8916 dan hwcomposer.msm8916 gagal kompilasi saat `m bacon`.
+for r in audio display; do
+    P=/root/a37-21/patches/qcom-caf_msm8916_$r
+    D=hardware/qcom-caf/msm8916/$r
+    if [ ! -d "$D" ]; then no "$D tidak ada"; rc=1
+    elif git -C "$D" log --oneline -1 --grep="String8::string() -> c_str" | grep -q .; then
+        ok "qcom-caf $r: patch String8 sudah terpasang"
+    elif [ "$CHECK" = 1 ]; then do_ "qcom-caf $r: PERLU terapkan $P"
+    else
+        if git -C "$D" am "$P"/*.patch >/dev/null 2>&1; then ok "qcom-caf $r: patch terpasang"
+        else git -C "$D" am --abort >/dev/null 2>&1; no "qcom-caf $r: git am GAGAL"; rc=1; fi
+    fi
+done
+
+# --- 5. seri patch packages/modules/adb (FunctionFS legacy) ---------------
+# Kernel 3.10 hanya punya FunctionFS v1; adbd A12+ memakai deskriptor v2/v3,
+# sehingga TANPA patch ini adb TIDAK PERNAH MUNCUL di perangkat -- dan itu
+# membatalkan pra-otorisasi /adb_keys sekaligus seluruh rencana debug Fase 8.
+#
+# Diverifikasi dengan membandingkan biner: adbd ROM LOS 20 yang berjalan
+# mengandung transport_legacy (2) dan usb_legacy (3); adbd hasil build 21
+# sebelum patch: nol dan nol.
+#
+# Official LineageOS 21 TIDAK memuatnya (nol berkas *legacy* di daemon/);
+# hanya LineageOS-UL yang menyimpannya. Commit 32d660acfb49 "adb: Bring back
+# support for legacy FunctionFS" -- 8 berkas, 689 baris.
+P=/root/a37-21/patches/packages_modules_adb
+D=packages/modules/adb
+if [ ! -d "$D" ]; then no "$D tidak ada"; rc=1
+elif git -C "$D" log --oneline -1 --grep="Bring back support for legacy FunctionFS" | grep -q .; then
+    ok "adbd: patch FunctionFS legacy sudah terpasang"
+elif [ "$CHECK" = 1 ]; then do_ "adbd: PERLU terapkan $P"
+else
+    if git -C "$D" am "$P"/*.patch >/dev/null 2>&1; then ok "adbd: patch terpasang"
+    else git -C "$D" am --abort >/dev/null 2>&1; no "adbd: git am GAGAL"; rc=1; fi
+fi
+
+# --- 6. seri patch build/make (zip -y saat mengemas OTA) ------------------
+P=/root/a37-21/patches/build_make
+D=build/make
+if [ ! -d "$D" ]; then no "$D tidak ada"; rc=1
+elif git -C "$D" log --oneline -1 --grep="zip -y agar symlink tidak diikuti" | grep -q .; then
+    ok "build/make: patch zip -y sudah terpasang"
+elif [ "$CHECK" = 1 ]; then do_ "build/make: PERLU terapkan $P"
+else
+    if git -C "$D" am "$P"/*.patch >/dev/null 2>&1; then ok "build/make: patch terpasang"
+    else git -C "$D" am --abort >/dev/null 2>&1; no "build/make: git am GAGAL"; rc=1; fi
+fi
+
+# --- 7. penjaga regresi ----------------------------------------------------
 echo; echo "-- penjaga regresi --"
 c(){ if [ -e "$1" ]; then ok "$2"; else no "$2 -- HILANG"; rc=1; fi; }
 c frameworks/native/libs/renderengine/gl \

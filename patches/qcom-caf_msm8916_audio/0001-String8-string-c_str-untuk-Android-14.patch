@@ -1,0 +1,91 @@
+From 70b4ab2007303f6ced5754bcc3d5a81b6059bb02 Mon Sep 17 00:00:00 2001
+From: rigaz29 <ryanbagas27@gmail.com>
+Date: Sun, 9 Aug 2026 09:28:26 +0000
+Subject: [PATCH] String8::string() -> c_str() untuk Android 14
+
+String8::string() jadi anggota privat di A14; seluruh pemakaian di repo ini
+diganti c_str(). Sama persis dengan perubahan di frameworks/av dan di device
+tree A37.
+
+Branch lineage-21.0-caf-msm8916 ternyata BELUM disesuaikan untuk A14 meski
+namanya 21.0 -- persis peringatan yang dicatat di A37-21.xml: nama branch bukan
+jaminan isi.
+---
+ audiod/AudioDaemon.cpp | 22 +++++++++++-----------
+ 1 file changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/audiod/AudioDaemon.cpp b/audiod/AudioDaemon.cpp
+index 6cab301..4b1952e 100644
+--- a/audiod/AudioDaemon.cpp
++++ b/audiod/AudioDaemon.cpp
+@@ -91,10 +91,10 @@ namespace android {
+                 path = "/proc/asound/card";
+                 path += ptr;
+                 path += "/state";
+-                ALOGD("Opening sound card state : %s", path.string());
+-                fd = open(path.string(), O_RDONLY);
++                ALOGD("Opening sound card state : %s", path.c_str());
++                fd = open(path.c_str(), O_RDONLY);
+                 if (fd == -1) {
+-                    ALOGE("Open %s failed : %s", path.string(), strerror(errno));
++                    ALOGE("Open %s failed : %s", path.c_str(), strerror(errno));
+                 } else {
+                     /* returns vector of pair<sndcard, fd> */
+                     sndcard = atoi(ptr);
+@@ -144,16 +144,16 @@ namespace android {
+             path += in_file->d_name;
+             path += "/state";
+ 
+-            ALOGE("Opening audio event state : %s ", path.string());
+-            fd = open(path.string(), O_RDONLY);
++            ALOGE("Opening audio event state : %s ", path.c_str());
++            fd = open(path.c_str(), O_RDONLY);
+             if (fd == -1) {
+-                ALOGE("Open %s failed : %s", path.string(), strerror(errno));
++                ALOGE("Open %s failed : %s", path.c_str(), strerror(errno));
+             } else {
+                 d_name = in_file->d_name;
+                 mAudioEvents.push_back(std::make_pair(d_name, fd));
+                 mAudioEventsStatus.push_back(std::make_pair(d_name, 0));
+                 ALOGD("event status mAudioEventsStatus= %s",
+-                          mAudioEventsStatus[0].first.string());
++                          mAudioEventsStatus[0].first.c_str());
+             }
+         }
+ 
+@@ -188,7 +188,7 @@ namespace android {
+              state_buf[1] = '\0';
+             if (atoi(state_buf) != mAudioEventsStatus[index].second) {
+                 ALOGD("notify audio HAL %s",
+-                        mAudioEvents[index].first.string());
++                        mAudioEvents[index].first.c_str());
+                 mAudioEventsStatus[index].second = atoi(state_buf);
+ 
+                 if (mAudioEventsStatus[index].second == 1)
+@@ -196,7 +196,7 @@ namespace android {
+                 else
+                     event_cur_state = audio_event_off;
+                 notifyAudioSystemEventStatus(
+-                               mAudioEventsStatus[index].first.string(),
++                               mAudioEventsStatus[index].first.c_str(),
+                                event_cur_state);
+             }
+         }
+@@ -438,7 +438,7 @@ namespace android {
+             else
+                 str += ",OFFLINE";
+         }
+-        ALOGV("%s: notifyAudioSystem : %s", __func__, str.string());
++        ALOGV("%s: notifyAudioSystem : %s", __func__, str.c_str());
+         AudioSystem::setParameters(0, str);
+     }
+ 
+@@ -454,7 +454,7 @@ namespace android {
+             str += ",ON";
+         else
+             str += ",OFF";
+-        ALOGD("%s: notifyAudioSystemEventStatus : %s", __func__, str.string());
++        ALOGD("%s: notifyAudioSystemEventStatus : %s", __func__, str.c_str());
+         AudioSystem::setParameters(0, str);
+     }
+ }

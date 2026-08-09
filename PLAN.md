@@ -751,6 +751,60 @@ m <8 modul prebuilt Soong vendor/oppo>             rc=0
 
 ---
 
+### Fase 7 — build ROM (9 Agustus 2026): **ZIP JADI**
+
+```
+lineage-21.0-20260809_105532-UNOFFICIAL-A37.zip   694 MB
+sha256 b81a8ad60719276d2c3579262d922d6253512f4d22b5c933feed9c75b4f125f4
+tools/verify-rom.sh   SEMUA VERIFIKASI LOLOS
+```
+
+Enam pemblokir ditemukan, dan **tidak satu pun terdeteksi fase sebelumnya** — semuanya baru
+muncul saat target yang bersangkutan benar-benar dibangun. Itu pelajaran tersendiri: `m nothing`
+memvalidasi parsing, bukan kompilasi.
+
+| # | Pemblokir | Perbaikan |
+|---|---|---|
+| 1 | `prebuilts/vndk/v28` tidak ada lagi (LOS 21 hanya v29–v34) | salinan `libbase-v28.so` **dibuang** — nol pemakai di tiga sumbu pemeriksaan |
+| 2 | `hardware/gps.h` tidak terjangkau implisit | `libhardware_headers` ke 5 makefile GPS |
+| 3 | pola sama menghantam 5 modul lain | **disapu**: `libhardware_headers` + `libutils_headers`, dan `String8::string()`→`c_str()` |
+| 4 | `String8::string()` juga di qcom-caf UL | patch audio (11 titik) + display (4 titik) |
+| 5 | `zip` mengikuti symlink `d -> /sys/kernel/debug` | patch `build/make`: tambahkan `-y` |
+| 6 | adbd tanpa FunctionFS legacy | cherry-pick UL `32d660acfb49` |
+
+**#6 adalah yang paling penting, dan nyaris lolos tanpa ketahuan.** `verify-rom.sh` menangkapnya:
+adbd hasil build punya `transport_legacy=0 usb_legacy=0`, sedangkan adbd ROM LOS 20 yang
+berjalan punya `2` dan `3`. Kernel 3.10 hanya punya FunctionFS v1 sementara adbd A12+ memakai
+deskriptor v2/v3 — **tanpa patch ini adb tidak akan pernah muncul**, yang sekaligus membatalkan
+pra-otorisasi `/adb_keys` dan seluruh rencana debug Fase 8. Official LineageOS 21 tidak
+memuatnya (nol berkas `*legacy*` di `daemon/`); hanya UL yang menyimpannya.
+
+**#4 dan #6 sama-sama membenarkan peringatan yang ditulis di `A37-21.xml` Fase 2:**
+*"nama branch bukan jaminan isi"*. Branch `lineage-21.0-caf-msm8916` belum A14-clean, dan
+official 21 kehilangan dukungan legacy yang perangkat ini butuhkan.
+
+**Batas mesin build — diukur, bukan diperkirakan.** Mesin: 12 core, **12 GB RAM**.
+
+```
+-j10, swap 16 GB, swappiness 10   ninja OOM-killed di 44%
+-j10, swap 32 GB, swappiness 60   LOLOS fase Java (swap terpakai 18 GB)
+-j6,  swap 10 GB                  soong_build OOM 2x (RSS 8,4 lalu 9,0 GB)
+-j6,  swap 16 GB                  LOLOS, 18 menit
+```
+
+Dua temuan yang berlawanan dengan intuisi:
+- **`vm.swappiness=10` adalah penyebab OOM pertama**, bukan kurang swap. Heap JVM adalah
+  halaman anonim; dengan swappiness serendah itu kernel memilih meng-OOM daripada memakainya —
+  16 GB swap menganggur saat ninja dibunuh.
+- **Untuk soong_build, swap nyaris tidak menolong.** Ia proses Go, dan GC-nya menyentuh
+  seluruh heap sehingga halaman yang di-swap langsung ditarik balik. Saat dibunuh, swap baru
+  terpakai 800 MB. Yang menolong hanyalah headroom.
+
+`WITH_DEXPREOPT=true` di varian userdebug maupun eng — jadi dugaan umum bahwa eng mempercepat
+atau memperlambat lewat dexpreopt tidak berlaku di pohon ini.
+
+---
+
 ## 7. Risiko yang diakui
 
 | Risiko | Dampak | Mitigasi |
