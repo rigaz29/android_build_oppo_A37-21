@@ -805,6 +805,66 @@ atau memperlambat lewat dexpreopt tidak berlaku di pohon ini.
 
 ---
 
+### Fase 8 (lanjutan) — port 96 patch UL 21, ROM dibangun ulang
+
+Celah yang **ditemukan pemilik proyek**, bukan oleh saya: proyek 20 mengekstrak
+135 patch UL secara sistematis; proyek 21 hanya menambahkan patch **ketika build
+gagal**. Mayoritas patch itu memperbaiki perilaku **runtime di kernel 3.10** dan
+tidak pernah memecahkan kompilasi — jadi lolos dari seluruh pemeriksaan Fase 2–7,
+yang semuanya build-time.
+
+Pemblokir boot paling nyata yang terlewat:
+
+```
+official lineage-21 bpfloader, saat eBPF gagal:
+    sleep(20);
+    return 2;        ← fatal
+```
+
+Kernel 3.10 pasti gagal eBPF. Patch UL menjadikannya non-fatal. `m bacon` tidak
+akan pernah mengeluhkan ini.
+
+**96 patch terpasang** (`patches/ul21/`, lihat MANIFEST-nya):
+T0 13 · T1 56 · T2 27.
+
+Tiga pemblokir muncul saat membangunnya, dua di antaranya satu kelas:
+
+| Pemblokir | Tindakan |
+|---|---|
+| `setOutOfService` tak cocok (`frameworks_base/0015`) | dibuang — berpasangan dengan patch telephony yang sengaja tidak di-port |
+| `invokeOemRilRequestRaw` tak diimplementasi (`frameworks_base/0014`) | dibuang — kelas kopling yang sama |
+| `mNeedsPostRenderCleanup` tak dideklarasikan + argumen ganda | resolver keep-both **otomatis** saya merusak `RenderEngineThreaded.cpp` |
+
+Setelah 0014/0015 dibuang, diverifikasi **nol** patch `frameworks_base` tersisa
+yang menyentuh `telephony/` — koplingnya memang tepat dua.
+
+**Kesalahan yang perlu diingat:** saya memakai resolver konflik otomatis dengan
+aturan *keep-both* buta untuk seluruh repo. Itu benar untuk daftar di makefile
+dan `file_contexts`, tapi **salah untuk kode** — ia menyimpan dua blok
+`mFunctionCalls.push`, satu dengan 6 argumen dan satu dengan 5.
+
+**Dua butir yang sebelumnya menggantung, kini terjawab:**
+
+- `sysfs_disk_stat` — seri UL `system_sepolicy` ternyata **sudah**
+  mendeklarasikannya di `system/sepolicy/public/file.te` (patch `4accd562e`,
+  persis yang proyek 20 buang). Deklarasi Fase 3 di device tree jadi duplikat dan
+  **dicabut**. Risiko freeze-test yang saya khawatirkan **tidak terwujud**:
+  `m sepolicy_freeze_test` rc=0.
+- Workaround `BOARD_SEPOLICY_M4DEFS` Fase 3 **dicabut** — patch UL
+  `device_lineage_sepolicy` memperbaikinya di sumbernya.
+
+```
+lineage-21.0-20260809_133142-UNOFFICIAL-A37.zip   695 MB
+sha256 f3b2b2802378002abd72c0dea8f5fc0762f7f8725aa2aad9a5173f19605b8002
+tools/verify-rom.sh        SEMUA VERIFIKASI LOLOS
+m sepolicy_freeze_test     rc=0
+```
+
+⚠️ ROM sebelumnya (`105532`) **gagal boot — masuk fastboot setelah splash**.
+ROM ini belum diuji; apakah 96 patch itu menyelesaikannya belum terbukti.
+
+---
+
 ## 7. Risiko yang diakui
 
 | Risiko | Dampak | Mitigasi |

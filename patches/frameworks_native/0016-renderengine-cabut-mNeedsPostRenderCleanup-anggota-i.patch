@@ -1,0 +1,75 @@
+From 788db7ec0fe4fb2c3b6b80e610ec151b51f0c4b6 Mon Sep 17 00:00:00 2001
+From: rigaz29 <ryanbagas27@gmail.com>
+Date: Sun, 9 Aug 2026 13:31:48 +0000
+Subject: [PATCH 16/16] =?UTF-8?q?renderengine:=20cabut=20mNeedsPostRenderC?=
+ =?UTF-8?q?leanup=20=E2=80=94=20anggota=20itu=20tidak=20ada=20lagi?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fase 4 menambahkannya saat me-resolve konflik seri GLES: official punya
+mNeedsPostRenderCleanup yang tak dikenal UL, jadi saya pertahankan keduanya.
+
+Di Fase 8 patch UL 'Revert Remove contention from Render Engine early return'
+(T1) MEMBUANG anggota itu dari RenderEngineThreaded.h, sehingga baris tersebut
+jadi rujukan ke pengenal yang tak dideklarasikan:
+
+  RenderEngineThreaded.cpp:309: error: use of undeclared identifier
+  'mNeedsPostRenderCleanup'
+  RenderEngineThreaded.cpp:322: error: too few arguments, expected 6, have 5
+
+Error kedua penyebabnya berbeda dan lebih memalukan: resolver konflik OTOMATIS
+yang saya pakai saat menerapkan seri T1 memakai aturan keep-both buta, sehingga
+menyimpan DUA blok mFunctionCalls.push -- yang benar (6 argumen) dan yang lama
+(5 argumen). Aturan keep-both cocok untuk daftar di makefile dan file_contexts,
+TIDAK untuk kode.
+
+Diperbaiki: satu push, dengan useFramebufferCache (drawLayersInternal memang 6
+argumen di include/renderengine/RenderEngine.h:253-257, dan GLESRenderEngine
+memerlukannya), tanpa mNeedsPostRenderCleanup.
+
+Diverifikasi: m librenderengine rc=0.
+Change-Id: I42581ae70439bb4a45805775ec8377645e96e167
+---
+ .../threaded/RenderEngineThreaded.cpp         | 21 +++++++++----------
+ 1 file changed, 10 insertions(+), 11 deletions(-)
+
+diff --git a/libs/renderengine/threaded/RenderEngineThreaded.cpp b/libs/renderengine/threaded/RenderEngineThreaded.cpp
+index 7ce87deb96..f9315b0fc8 100644
+--- a/libs/renderengine/threaded/RenderEngineThreaded.cpp
++++ b/libs/renderengine/threaded/RenderEngineThreaded.cpp
+@@ -303,10 +303,16 @@ ftl::Future<FenceResult> RenderEngineThreaded::drawLayers(
+     int fd = bufferFence.release();
+     {
+         std::lock_guard lock(mThreadMutex);
+-        // Gabungan: mNeedsPostRenderCleanup berasal dari official (lebih baru,
+-        // tidak dikenal UL), useFramebufferCache dikembalikan oleh revert ini
+-        // karena GLESRenderEngine memerlukannya. Keduanya dipertahankan.
+-        mNeedsPostRenderCleanup = true;
++        // Fase 4 sempat menambahkan `mNeedsPostRenderCleanup = true;` di sini
++        // (gabungan dengan sisi official). Itu DICABUT di Fase 8: patch UL
++        // "Revert Remove contention from Render Engine early return" membuang
++        // anggota itu dari RenderEngineThreaded.h, jadi barisnya jadi rujukan
++        // ke pengenal yang tak dideklarasikan. Diverifikasi: nol kemunculan
++        // mNeedsPostRenderCleanup di seluruh libs/renderengine selain baris itu.
++        //
++        // useFramebufferCache TETAP — drawLayersInternal memang 6 argumen
++        // (include/renderengine/RenderEngine.h:253-257), dan GLESRenderEngine
++        // memerlukannya.
+         mFunctionCalls.push([resultPromise, display, layers, buffer, useFramebufferCache,
+                              fd](renderengine::RenderEngine& instance) {
+             ATRACE_NAME("REThreaded::drawLayers");
+@@ -314,13 +320,6 @@ ftl::Future<FenceResult> RenderEngineThreaded::drawLayers(
+             instance.drawLayersInternal(std::move(resultPromise), display, layers, buffer,
+                                         useFramebufferCache, base::unique_fd(fd));
+         });
+-        mFunctionCalls.push(
+-                [resultPromise, display, layers, buffer, fd](renderengine::RenderEngine& instance) {
+-                    ATRACE_NAME("REThreaded::drawLayers");
+-                    instance.updateProtectedContext(layers, buffer);
+-                    instance.drawLayersInternal(std::move(resultPromise), display, layers, buffer,
+-                                                base::unique_fd(fd));
+-                });
+     }
+     mCondition.notify_one();
+     return resultFuture;

@@ -1,7 +1,7 @@
 From 9790499794a905a972914ac06155082dac92eabe Mon Sep 17 00:00:00 2001
 From: TARKZiM <tom8476oo@gmail.com>
 Date: Tue, 17 Sep 2024 18:48:19 +0800
-Subject: [PATCH 4/9] Revert "Remove useFramebufferCache parameter in
+Subject: [PATCH 04/16] Revert "Remove useFramebufferCache parameter in
  drawLayers()"
 
 This reverts commit f29700fb05dd225dc5b80dac5e4d80e074622e09.

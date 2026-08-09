@@ -1,7 +1,7 @@
 From 66b3cf7062dadd00af67e296cccc746e85f2bcb1 Mon Sep 17 00:00:00 2001
 From: TARKZiM <tom8476oo@gmail.com>
 Date: Tue, 17 Sep 2024 18:53:37 +0800
-Subject: [PATCH 7/9] Revert "vulkan_renderengine: Check for support first"
+Subject: [PATCH 07/16] Revert "vulkan_renderengine: Check for support first"
 
 This reverts commit f3369eda0af91df158d66f1e4d906a0f0b1496e7.
 ---

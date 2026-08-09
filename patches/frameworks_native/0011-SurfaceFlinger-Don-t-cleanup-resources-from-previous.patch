@@ -1,0 +1,57 @@
+From 594ffa0e3dfe0a922226c90429009e54400ce642 Mon Sep 17 00:00:00 2001
+From: Arne Coucheron <arco68@gmail.com>
+Date: Fri, 6 Nov 2020 15:22:40 -0500
+Subject: [PATCH 11/16] SurfaceFlinger: Don't cleanup resources from previous
+ frame
+
+Causes bad lag on some legacy devices.
+
+Change-Id: I89913d214c7377c73bd307696dbf9aac2f9a5c0a
+
+SurfaceFlinger: Don't cleanup resources from previous frame on display
+
+we have this again ha ha
+
+Change-Id: I3ffe5247efdf5053a8ae5b9b43d3cdff1272a1fe
+
+SurfaceFlinger: Don't cleanup resources from previous frame on virtual display
+
+Causes bad lag on some legacy devices while WFD
+---
+ services/surfaceflinger/Android.bp         | 1 +
+ services/surfaceflinger/SurfaceFlinger.cpp | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/services/surfaceflinger/Android.bp b/services/surfaceflinger/Android.bp
+index d14ad417d5..ab723ace1d 100644
+--- a/services/surfaceflinger/Android.bp
++++ b/services/surfaceflinger/Android.bp
+@@ -43,6 +43,7 @@ cc_defaults {
+     defaults: [
+         "android.hardware.graphics.composer3-ndk_shared",
+         "android.hardware.power-ndk_shared",
++        "disable_postrender_cleanup_defaults",
+         "librenderengine_deps",
+         "libtimestats_deps",
+         "surfaceflinger_defaults",
+diff --git a/services/surfaceflinger/SurfaceFlinger.cpp b/services/surfaceflinger/SurfaceFlinger.cpp
+index 3ab1d298f0..723abb277c 100644
+--- a/services/surfaceflinger/SurfaceFlinger.cpp
++++ b/services/surfaceflinger/SurfaceFlinger.cpp
+@@ -3233,12 +3233,16 @@ void SurfaceFlinger::onCompositionPresented(PhysicalDisplayId pacesetterId,
+     }
+ 
+     if (hasPacesetterDisplay && !pacesetterDisplay->isPoweredOn()) {
++#ifndef DISABLE_POSTRENDER_CLEANUP
+         getRenderEngine().cleanupPostRender();
++#endif
+         return;
+     }
+ 
++#ifndef DISABLE_POSTRENDER_CLEANUP
+     // Cleanup any outstanding resources due to rendering a prior frame.
+     getRenderEngine().cleanupPostRender();
++#endif
+ 
+     {
+         std::lock_guard lock(mTexturePoolMutex);

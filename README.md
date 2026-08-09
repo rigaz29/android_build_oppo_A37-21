@@ -20,7 +20,7 @@ Qualcomm MSM8916 (Snapdragon 410), kernel 3.10.108 arm64, 2 GB RAM, Adreno 306.
 > ```
 >
 > ```
-> lineage-21.0-20260809_105532-UNOFFICIAL-A37.zip   694 MB
+> lineage-21.0-20260809_133142-UNOFFICIAL-A37.zip   695 MB  (+96 patch UL)
 > tools/verify-rom.sh   SEMUA VERIFIKASI LOLOS
 > ```
 >
@@ -29,7 +29,7 @@ Qualcomm MSM8916 (Snapdragon 410), kernel 3.10.108 arm64, 2 GB RAM, Adreno 306.
 >
 > Rinciannya di [`PLAN.md`](PLAN.md), satu bagian per fase.
 >
-> ⚠️ ROM ini **belum pernah di-boot**. Semua di atas bukti build dan verifikasi statis.
+> ⚠️ ROM sebelumnya gagal boot (masuk fastboot setelah splash); ROM ini belum diuji. Semua di atas bukti build dan verifikasi statis.
 > Kamera, tethering, Wi-Fi AIDL, dan clearkey baru terbukti di Fase 8.
 >
 > Pendahulunya: [`android_build_oppo_A37-20`](https://github.com/rigaz29/android_build_oppo_A37-20)

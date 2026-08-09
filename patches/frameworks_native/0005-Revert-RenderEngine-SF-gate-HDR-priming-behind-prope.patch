@@ -1,7 +1,7 @@
 From 14dd8e5d45bec081cadb5ef5a44e59657a42a71a Mon Sep 17 00:00:00 2001
 From: Yaroslav Zviezda <acroreiser@gmail.com>
 Date: Sun, 31 Mar 2024 21:53:35 +0300
-Subject: [PATCH 5/9] Revert "RenderEngine, SF: gate HDR priming behind
+Subject: [PATCH 05/16] Revert "RenderEngine, SF: gate HDR priming behind
  property"
 
 This reverts commit b9b5b706d449212094fd020dfd30509234a8c0b4.
