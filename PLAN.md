@@ -220,16 +220,32 @@ Mengikuti pola `A37-20.xml`:
 
 ---
 
-## 4. Delta 20 → 21 yang harus diverifikasi di tree
+## 4. Delta 20 → 21 — SELESAI DIVERIFIKASI (9 Agustus 2026, Fase 3)
 
-Daftar ini **belum diverifikasi** — sync `/root/los21` baru selesai saat rencana ini ditulis.
-Kerjakan sebagai Fase 2, dengan metode yang sama seperti proyek 20:
+Kriteria selesai: `m sepolicy_freeze_test selinux_policy` rc=0 dan `m nothing` rc=0.
+**Tercapai.** Yang di bawah bukan lagi daftar tugas, melainkan hasil pengukuran.
 
-- [ ] Variabel build usang: `grep KATI_obsolete_var build/make/core/*.mk` lalu silang-periksa
-      terhadap device tree kita. Di 20 hasilnya cuma 1.
-- [ ] `PRODUCT_SHIPPING_API_LEVEL := 21` — apakah gerbang
-      `PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS` (≥29) dan `PRODUCT_SET_DEBUGFS_RESTRICTIONS`
-      (≥31) masih bekerja sama di A14.
+- [x] **Variabel build usang — 1 temuan, sama seperti proyek 20.**
+      Dari **74** nama yang dideklarasikan `KATI_obsolete_var`/`KATI_deprecated_var`, device
+      tree memakai tepat satu: `TARGET_USES_64_BIT_BINDER`. **Dibuang.** Bukan sekadar
+      dikomentari: dicari di seluruh `build/`, `system/`, `frameworks/`, satu-satunya
+      kemunculan tersisa adalah deklarasi `KATI_deprecated_var`-nya sendiri — jadi baris itu
+      nol efek, persis kategori §5.2. Diverifikasi hilang dari log build.
+- [x] **`PRODUCT_SHIPPING_API_LEVEL := 21` — tidak ada yang perlu diubah.**
+      Bukan hanya dua gerbang yang disebut rencana awal; **keenam** gerbang yang membaca
+      variabel ini di A14 dienumerasi dan semuanya berperilaku sama seperti A13:
+
+      | Gerbang | Ambang | Hasil dengan 21 |
+      |---|---|---|
+      | `PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS` | ≥ 29 | tidak aktif |
+      | `PRODUCT_SET_DEBUGFS_RESTRICTIONS` | ≥ 31 | tidak aktif |
+      | `PRODUCT_ENFORCE_PRODUCT_PARTITION_INTERFACE` | > 29 | tidak aktif |
+      | `PRODUCT_FULL_TREBLE` | ≥ 26 | **false** |
+      | error `BOARD_OTA_FRAMEWORK_VBMETA_VERSION_OVERRIDE` | ≥ 29 | tidak kena |
+      | error `PRODUCT_RETROFIT_DYNAMIC_PARTITIONS` | ≥ 29 | tidak kena |
+
+      Dikonfirmasi dari nilai yang benar-benar dipakai build (`get_build_var`), bukan dari
+      membaca makefile saja.
 - [x] `RenderEngineType::GLES` — **SUDAH DIVERIFIKASI 8 Agustus 2026, dan hasilnya penting.**
       AOSP 14 mencabut RenderEngine GLES seluruhnya:
 
@@ -241,8 +257,64 @@ Kerjakan sebagai Fase 2, dengan metode yang sama seperti proyek 20:
       Artinya **perbaikan 10.B kita tidak akan berfungsi di atas official 21 apa adanya** —
       Adreno 306 dipaksa ke Skia dan SurfaceFlinger crash seperti dulu. `frameworks/native`
       **wajib** memakai pemulihan UL 21. Ini bukan opsi kenyamanan; ini pemblokir boot.
-- [ ] Lokasi sepolicy dan `sepolicy` version (33.0 → 34.0).
-- [ ] `system/sepolicy` `sysfs_disk_stat` — di 20 harus dibuang untuk lolos `sepolicy_freeze_test`.
+- [x] **Versi sepolicy — dugaan "33.0 → 34.0" MELESET; jawabannya `202404`.**
+      A14 memakai skema berbasis tanggal, bukan `<sdk>.0`:
+      `PLATFORM_SEPOLICY_VERSION = BOARD_API_LEVEL = 202404`, dan
+      `system/sepolicy/prebuilts/api/202404/` memang ada di samping `29.0`…`34.0`.
+      **Tidak ada yang perlu diubah di device tree** — nilainya otomatis.
+      Catatan: `device/qcom/sepolicy-legacy/sepolicy.mk:25` menyetel
+      `BOARD_SEPOLICY_VERS := $(PLATFORM_SDK_VERSION).0` (= `34.0`), tapi baris itu **mati** —
+      `build/make/core/config.mk:882` menimpanya dengan `202404` lalu menandainya
+      `.KATI_READONLY`. Tidak error karena BoardConfig di-include di baris 445, sebelum 882.
+
+- [x] **`sysfs_disk_stat` — dikonfirmasi jadi pemblokir, diselesaikan dengan cara berbeda dari proyek 20.**
+      `device/qcom/sepolicy-legacy/legacy-common/file_contexts:87-88` melabeli
+      `/sys/.../block/mmcblk[0-9]/stat` dengan tipe yang **tidak pernah dideklarasikan di
+      mana pun** di repo itu, sehingga `vendor_file_contexts_test` gagal.
+      Proyek 20 membuang kedua baris label; di sini tipenya justru **dideklarasikan** di
+      `device/oppo/A37/sepolicy/file.te`, supaya perubahan tetap di repo milik sendiri.
+      ⚠️ Konsekuensi untuk Fase 5 dicatat di berkas itu: labelnya kini `sysfs_disk_stat`,
+      bukan jatuh ke `sysfs` seperti ROM 20. Nol beda selama permissive.
+
+- [x] **TEMUAN BARU yang tidak ada di daftar ini — m4def `vendor_` merusak sepolicy legacy.**
+      Ini pemblokir sesungguhnya, dan baru ketahuan karena Fase 3 menjalankan uji, bukan
+      membaca kode. `device/qcom/sepolicy-legacy/sepolicy.mk:27` meng-`-include`
+      `device/lineage/sepolicy/qcom/sepolicy.mk`, yang memasang `BOARD_SEPOLICY_M4DEFS`
+      pengganti nama tipe QCOM jadi berawalan `vendor_`. Karena m4 bekerja tekstual,
+      efeknya timpang di `common/hal_gnss_qti.te`:
+
+      ```
+      baris 29  type hal_gnss_qti, domain;       -> type vendor_hal_gnss_qti   (diganti)
+      baris 30  type hal_gnss_qti_exec, ...      -> TIDAK diganti (token beda)
+      baris 31  init_daemon_domain(hal_gnss_qti) -> memakai vendor_hal_gnss_qti_exec
+      ```
+      ```
+      hal_gnss_qti.te:31: ERROR 'unknown type vendor_hal_gnss_qti_exec'
+      ```
+
+      Acuannya diambil dari perangkat, bukan dari makefile — `vendor_sepolicy.cil` milik ROM
+      20 yang terpasang seluruhnya **tanpa awalan** (`hal_gnss_qti` 11, `vendor_hal_gnss_qti`
+      0; `location` 124, `vendor_location` 0). Maka `BOARD_SEPOLICY_M4DEFS` dikosongkan di
+      `BoardConfig.mk`, kecuali satu yang wajib: `location_domain=location`, karena
+      `device/lineage/sepolicy/qcom/vendor/location.te` (**baru di 21** — tidak ada di branch
+      `lineage-20.0`) memakai token itu, dan tipe yang benar-benar ada adalah `location`.
+
+      Hasilnya policy 21 kini bernama sama dengan ROM 20: `hal_gnss_qti` 12, `location` 125,
+      seluruh `vendor_*` nol.
+
+      **Yang masih terbuka:** *mengapa* LOS 20 tidak terkena belum tuntas. `device/lineage/sepolicy`
+      ada di manifest 20 maupun 21, dan baris `-include`-nya ada di sepolicy-legacy branch 20
+      maupun 21 — jadi penjelasan strukturalnya belum ketemu. Hasil akhirnya yang diukur, dan
+      itu yang dipakai.
+
+- [x] **Aturan install ganda — diperiksa, bukan bug.**
+      Build memperingatkan `overriding commands` untuk `libmm-omxcore.so` dan
+      `libldacBT_enc.so`: keduanya datang dua kali, sebagai blob `PRODUCT_COPY_FILES` dan
+      sebagai modul hasil build. `PRODUCT_COPY_FILES` yang menang, dan **itu memang yang
+      dikirim ROM 20** — md5 berkas di perangkat identik dengan blob di `vendor/oppo`.
+      Dari sembilan modul yang dipulihkan Fase 4, hanya `libmm-omxcore` yang tertimpa;
+      delapan sisanya benar-benar dipakai dari hasil build, jadi perbaikan gerbang
+      `QCOM_BOARD_PLATFORMS` tetap perlu.
 
 ---
 
