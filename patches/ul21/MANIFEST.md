@@ -43,8 +43,8 @@ Penerapan: `tools/apply-ul21-patches.sh`.
 | T1 | `frameworks_native` | 6 | hanya 0001–0006; 0007–0015 = seri GLES yang sudah dipasang Fase 4 |
 | T1 | `packages_modules_Bluetooth` | 4 | |
 | T2 | `frameworks_av` | 6 | libaudiohal 2.0, BT in-call CAF, SCO fallback, 2 patch kamera |
-| T2 | `frameworks_base` | 22 | 0015 dibuang — lihat di bawah |
-| | **total terpasang** | **97** | |
+| T2 | `frameworks_base` | 21 | 0014 dan 0015 dibuang — lihat di bawah |
+| | **total terpasang** | **96** | |
 
 ## TIDAK dipasang, dengan alasan
 
@@ -53,7 +53,7 @@ Penerapan: `tools/apply-ul21-patches.sh`.
 | `vendor_lineage/0008` revert `TARGET_CAMERA_BOOTTIME_TIMESTAMP` | Flag-nya **tidak disetel** device tree kita → kode mati. Patch juga konflik. Preseden proyek 20: patch bergerbang flag tak disetel dibuang ("kode mati, hanya menambah permukaan konflik") |
 | `vendor_lineage/0011` kernel clean headers uapi/asm | Isinya **sudah ada** di tree (`git apply` → "nothing to commit") |
 | `frameworks_libs_net`, `packages_modules_Wifi` | UL **tidak punya** branch `lineage-21.0` untuk keduanya (diverifikasi lewat API GitHub) |
-| `frameworks_base/0015` revert "Removed IWLAN legacy mode support" | **Berpasangan dengan patch telephony yang sengaja tidak di-port.** Patch ini mengembalikan `ServiceState.setOutOfService(boolean legacyMode, boolean powerOff)`, sedangkan `frameworks/opt/telephony` official memanggil bentuk 1-argumen → `m bacon` gagal di `ServiceStateTracker.java:674`. UL punya branch `lineage-21.0` untuk `frameworks_opt_telephony`, jadi memasang pasangannya BISA dilakukan — tapi proyek 20 sengaja menunda seluruh seri RIL ("fase M6, hanya setelah paritas tercapai"), dan RIL adalah satu-satunya subsistem yang sudah TERBUKTI berfungsi. Menyentuhnya saat sedang mengejar kegagalan boot menambah risiko tanpa keuntungan yang jelas: yang dipulihkan patch ini adalah mode IWLAN legacy (panggilan Wi-Fi). Kalau nanti IWLAN memang dibutuhkan, port `frameworks_opt_telephony` sebagai pasangannya — jangan pasang 0015 sendirian. |
+| `frameworks_base/0014` revert "Remove deprecated IRadio 1.4 APIs" **dan** `0015` revert "Removed IWLAN legacy mode support" | **Berpasangan dengan patch telephony yang sengaja tidak di-port.** Keduanya gagal dengan pola yang sama — API telephony ditambah/diubah di `frameworks/base`, sementara repo yang mengimplementasikannya tidak ikut dipatch:<br>`0015` → `ServiceStateTracker.java:674: method setOutOfService cannot be applied to given types`<br>`0014` → `PhoneInterfaceManager.java:289: does not override abstract method invokeOemRilRequestRaw(byte[],byte[]) in ITelephony`<br>Diverifikasi setelah keduanya dibuang: **nol** patch tersisa yang menyentuh `telephony/`. UL punya branch `lineage-21.0` untuk `frameworks_opt_telephony`, jadi memasang pasangannya BISA dilakukan — tapi proyek 20 sengaja menunda seluruh seri RIL ("fase M6, hanya setelah paritas tercapai"), dan RIL adalah satu-satunya subsistem yang sudah TERBUKTI berfungsi. Menyentuhnya saat sedang mengejar kegagalan boot menambah risiko tanpa keuntungan yang jelas: yang dipulihkan patch ini adalah mode IWLAN legacy (panggilan Wi-Fi). Kalau nanti IWLAN memang dibutuhkan, port `frameworks_opt_telephony` sebagai pasangannya — jangan pasang 0015 sendirian. |
 
 ## Efek samping yang menghapus workaround lama
 
