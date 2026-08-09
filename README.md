@@ -3,7 +3,7 @@
 Rencana porting **LineageOS 21 (Android 14, SDK 34)** untuk **OPPO A37 / A37f / A37fw** —
 Qualcomm MSM8916 (Snapdragon 410), kernel 3.10.108 arm64, 2 GB RAM, Adreno 306.
 
-> ## Status: **Fase 1, 2, 3, dan 4 selesai**
+> ## Status: **Fase 1, 2, 3, 4, dan 5 selesai**
 >
 > Tree LineageOS 21 official sudah tersedia dan terverifikasi: **1430 project, 0 HEAD kosong,
 > 169 GB**, manifest `2ea6537` melacak **ASB 2026-06**.
@@ -16,6 +16,7 @@ Qualcomm MSM8916 (Snapdragon 410), kernel 3.10.108 arm64, 2 GB RAM, Adreno 306.
 > m cameraserver       rc=0
 > m librenderengine surfaceflinger   rc=0   backend GLES kembali dikenali
 > m sepolicy_freeze_test selinux_policy rc=0
+> m check-vintf-all                      rc=0   COMPATIBLE
 > ```
 >
 > Rinciannya di [`PLAN.md`](PLAN.md) §Fase 1 dan §Fase 4.

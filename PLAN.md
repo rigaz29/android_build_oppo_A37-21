@@ -631,6 +631,72 @@ runtime (tethering, Wi-Fi AIDL, clearkey) — itu Fase 8.
 
 ---
 
+### Fase 5 — VINTF & SEPolicy (9 Agustus 2026): `m check-vintf-all` COMPATIBLE
+
+Kriteria selesai: `m check-vintf-all sepolicy_freeze_test selinux_policy` rc=0. **Tercapai.**
+
+**5.1 `target-level="legacy"` tidak lagi bisa dibangun di A14.** Android 14 mencabut framework
+compatibility matrix untuk FCM version `legacy` — `hardware/interfaces/compatibility_matrices/`
+tinggal 5, 6, 7, 8, 202404. `VintfObject.cpp:1014` menolaknya:
+
+```
+ERROR: Cannot find framework matrix at FCM version legacy.
+```
+
+Ini **menggagalkan build ROM**, bukan peringatan: `check_vintf_compatible` ikut `droid_targets`
+(`build/make/core/Makefile:5418`) selama `PRODUCT_ENFORCE_VINTF_MANIFEST` true — dan
+`device.mk:671` memang menyetelnya true lewat `_OVERRIDE`.
+
+**5.2 Dua jalan keluar, dan kenapa yang murah ditolak.**
+
+| | Ongkos |
+|---|---|
+| Matikan `PRODUCT_ENFORCE_VINTF_MANIFEST` | libhidl kehilangan `-DENFORCE_VINTF_MANIFEST`, dan `ServiceManagement.cpp:967-975` menjalankan **`sleep(1)` di setiap `getRawServiceInternal()`** — tiap `getService()` di seluruh sistem, bukan hanya saat retry |
+| Naikkan `target-level` ke nilai yang punya matrix | Perlu mendaftarkan HAL device-specific sebagai optional |
+
+Dipilih yang kedua. `target-level` jadi **5** — nilai terendah yang masih punya matrix, jadi
+paling sedikit menuntut.
+
+**5.3 Sepuluh HAL yang lalu ditolak, dan perbaikannya disarankan checkvintf sendiri.**
+Mulai FCM 5, instance yang ada di device manifest tapi tak dikenal matrix framework mana pun
+ditolak. Yang kena: `android.frameworks.cameraservice.service@2.1`, `configstore@1.1`,
+`light@2.0::ILight`, `power@1.0`, `radio.deprecated@1.0::IOemHook` (slot1+slot2),
+`vibrator@1.0`, `vendor.lineage.health`, `vendor.lineage.livedisplay@2.0`,
+`vendor.qti.hardware.perf@1.0`.
+
+checkvintf mencetak solusinya: *"For device-specific HALs, add to
+DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE"*. Dibuat
+`device/oppo/A37/framework_compatibility_matrix.xml`, seluruh entri `optional="true"` —
+wajib, karena `hardware/interfaces/compatibility_matrices/Android.mk:42-51` memvalidasi berkas
+itu terhadap manifest **kosong**, sehingga entri wajib akan menggagalkan build.
+
+⚠️ **Jujur soal batasnya:** ROM jangkar a6000 LOS 21 tetap mengirim `target-level="legacy"`
+dan boot. Jadi `legacy` masih sah **saat runtime** di A14; yang menolaknya pemeriksaan saat
+**build**. Perubahan ini menyenangkan build system, dan konsekuensi runtimenya belum diuji.
+
+**5.4 SEPolicy — diukur, bukan diperbaiki.** `SELINUX_IGNORE_NEVERALLOWS` tetap wajib.
+Diukur ulang dengan menyetelnya `false` **setelah** include sepolicy-legacy (kalau sebelum,
+`sepolicy.mk:11` menimpanya jadi true — dan env var di baris perintah pun tidak berpengaruh):
+
+| Sumber | Pelanggaran |
+|---|---|
+| `system/sepolicy` | **3.178** (2.219 dari `private/property.te`, 697 dari `public/domain.te`) |
+| `device/qcom` | 61 |
+| **`device/oppo`** | **11** |
+| `device/lineage` | 4 |
+| **total** | **3.970** (naik dari ~1.500 di LOS 20) |
+
+Dari 11 atas nama device tree kita, hanya **satu** benar-benar milik kita:
+`app_domain(timekeep_app)` — sama seperti di 20. Sepuluh sisanya tercatat sebagai
+"line 15 of `adbd.te`" padahal `adbd.te` kita cuma **satu baris**: itu salah-atribusi penanda
+`#line` milik m4, dan aturan sebenarnya adalah neverallow platform soal
+`virtualizationmanager`. Dicatat supaya tidak dicari ulang di berkas yang salah.
+
+Membereskan 3.178 pelanggaran platform-vs-QCOM-legacy bukan pekerjaan device tree ini.
+SELinux tetap **permissive**; enforcing bukan bagian fase ini.
+
+---
+
 ## 7. Risiko yang diakui
 
 | Risiko | Dampak | Mitigasi |
