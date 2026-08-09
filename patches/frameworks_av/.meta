@@ -2,14 +2,39 @@ repo: frameworks/av
 basis: LineageOS/android_frameworks_av lineage-21.0 @ d3075fbfd3
 sumber-patch: LineageOS-UL/android_frameworks_av lineage-20.0 (device1/, api1/CameraClient)
 tanggal: 2026-08-08
-status: TERSTAGING, BELUM terverifikasi kompilasi
+status: KOMPILASI TERVERIFIKASI — `m libcameraservice` dan `m cameraserver` rc=0
+        (lunch lineage_A37-ap2a-userdebug). Perilaku di perangkat BELUM diuji: Fase 8.
 
-Isi 0001: 4 berkas salin (2.772 baris) + entri Android.bp.
+0001  Salin berkas HAL1: device1/CameraHardwareInterface.{cpp,h},
+      api1/CameraClient.{cpp,h} (2.772 baris) + entri Android.bp.
 
-BELUM termasuk adaptasi yang masih harus ditulis (PLAN.md sec.2.2):
-  - DeviceInfo1 di common/CameraProviderManager.{h,cpp}          ~130 baris
-  - HidlDeviceInfo1 + cabang di common/hidl/HidlProviderInfo.*   ~60 baris (TULIS BARU)
-  - startDeviceInterface di-template ulang                        ~10 baris
-    (A14 mematoknya ke V3_2::ICameraDevice; HAL1 butuh V1_0)
-  - case 1: di switch versi HIDL, CameraProviderManager.cpp:2360
-  - pengabelan `new CameraClient` di CameraService.cpp            2 titik
+0002  Adaptasi ke arsitektur Android 14. Bagian ini ditulis untuk proyek ini,
+      bukan disalin dari UL — A14 memecah CameraProviderManager jadi
+      HidlProviderInfo/AidlProviderInfo, sehingga bentuk UL 20 tidak berlaku lagi.
+
+        CameraProviderManager   case 1: di switch versi mayor HIDL
+                                openSession() untuk V1_0
+        HidlProviderInfo        HidlDeviceInfo1 (turunan DeviceInfo langsung)
+                                startDeviceInterface1()
+                                initializeHidlDeviceInfo1()
+        CameraClient            konstruktor + initialize() ke kontrak A14,
+                                CameraServiceProxyWrapper berbasis instance,
+                                8 virtual murni baru diimplementasikan
+        CameraService           makeClient() membuat CameraClient untuk HAL1,
+                                friend class CameraClient
+
+      Empat hal yang hanya ketahuan dari compiler/linker, dicatat agar tidak
+      dicari ulang kalau seri ini perlu di-rebase:
+        - String8::string() jadi privat -> c_str() (29 tempat)
+        - mapToStatusT pindah ke HidlProviderInfo; deklarasi lama masih ada
+          tapi definisinya tidak, jadi gagalnya baru saat LINK
+        - CameraClient.h wajib include device1/CameraHardwareInterface.h,
+          kalau tidak HandleTimestampMessage mengikat ke tipe HIDL senama
+        - konstanta ekstensi QCOM tidak ada di system/core official; nilainya
+          disalin dari UL lineage-21.0 dan didefinisikan lokal di CameraClient.cpp
+
+Catatan rebase: 0002 menyentuh berkas yang aktif diubah hulu
+(CameraService.cpp, CameraProviderManager.*). Kalau `repo sync` memutusnya,
+titik yang paling mungkin bergeser adalah daftar virtual murni di
+CameraService.h — hulu menambahnya dari waktu ke waktu, dan setiap tambahan
+membuat CameraClient jadi abstrak lagi.

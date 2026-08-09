@@ -3,16 +3,24 @@
 Rencana porting **LineageOS 21 (Android 14, SDK 34)** untuk **OPPO A37 / A37f / A37fw** —
 Qualcomm MSM8916 (Snapdragon 410), kernel 3.10.108 arm64, 2 GB RAM, Adreno 306.
 
-> ## Status: Fase 1 (terstaging), **2 dan 4 selesai**
+> ## Status: **Fase 1, 2, dan 4 selesai**
 >
 > Tree LineageOS 21 official sudah tersedia dan terverifikasi: **1430 project, 0 HEAD kosong,
 > 169 GB**, manifest `2ea6537` melacak **ASB 2026-06**.
 >
-> **`m nothing` lolos `rc=0`** dengan `lunch lineage_A37-ap2a-userdebug` — nol pelanggaran
-> link-type, nol modul hilang. Rinciannya di [`PLAN.md`](PLAN.md) §Fase 4.
+> Dengan `lunch lineage_A37-ap2a-userdebug`:
 >
-> Sisa Fase 1: ± 200 baris adaptasi kamera (`DeviceInfo1`, `HidlDeviceInfo1`, `case 1:` di
-> switch HIDL, wiring `CameraService`) sampai `m libcameraservice` rc=0.
+> ```
+> m nothing            rc=0   nol pelanggaran link-type, nol modul hilang
+> m libcameraservice   rc=0   jalur kamera HAL1 tersambung penuh
+> m cameraserver       rc=0
+> m librenderengine surfaceflinger   rc=0   backend GLES kembali dikenali
+> ```
+>
+> Rinciannya di [`PLAN.md`](PLAN.md) §Fase 1 dan §Fase 4.
+>
+> ⚠️ Semua ini **bukti kompilasi**, bukan bukti fungsi. Kamera, tethering, Wi-Fi AIDL, dan
+> clearkey baru terbukti saat boot di Fase 8.
 >
 > Pendahulunya: [`android_build_oppo_A37-20`](https://github.com/rigaz29/android_build_oppo_A37-20)
 > — LineageOS 20, **ROM terpasang dan dipakai di perangkat**: boot, Wi-Fi, Bluetooth, dan

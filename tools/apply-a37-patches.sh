@@ -31,9 +31,9 @@ else no "$SRC tidak ada"; rc=1; fi
 # --- 2. seri patch frameworks/av (kamera HAL1) -----------------------------
 P=/root/a37-21/patches/frameworks_av
 if [ ! -d frameworks/av ]; then no "frameworks/av tidak ada"; rc=1
-elif git -C frameworks/av log --oneline -1 --grep="restore HAL1 support" | grep -q .; then
-    ok "kamera: patch HAL1 sudah terpasang"
-elif [ "$CHECK" = 1 ]; then do_ "kamera: PERLU terapkan $P/0001-*.patch"
+elif git -C frameworks/av log --oneline -1 --grep="adaptasi HAL1 ke arsitektur Android 14" | grep -q .; then
+    ok "kamera: seri HAL1 (2 patch) sudah terpasang"
+elif [ "$CHECK" = 1 ]; then do_ "kamera: PERLU terapkan seri $P (2 patch)"
 else
     do_ "kamera: terapkan seri $P"
     if git -C frameworks/av am "$P"/*.patch >/dev/null 2>&1; then ok "kamera: seri terpasang"

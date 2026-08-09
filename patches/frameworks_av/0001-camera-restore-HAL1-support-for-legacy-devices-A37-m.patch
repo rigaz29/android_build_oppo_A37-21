@@ -1,7 +1,8 @@
 From 877e7bbcb4c357156ce650b967f2515e9eb7b0d0 Mon Sep 17 00:00:00 2001
 From: rigaz29 <ryanbagas27@gmail.com>
 Date: Sat, 8 Aug 2026 17:41:58 +0000
-Subject: [PATCH] camera: restore HAL1 support for legacy devices (A37/msm8916)
+Subject: [PATCH 1/2] camera: restore HAL1 support for legacy devices
+ (A37/msm8916)
 
 Sumber: LineageOS-UL/android_frameworks_av lineage-20.0.
 AOSP 14 mencabut device1/ dan api1/CameraClient; blob kamera A37 adalah HAL1.

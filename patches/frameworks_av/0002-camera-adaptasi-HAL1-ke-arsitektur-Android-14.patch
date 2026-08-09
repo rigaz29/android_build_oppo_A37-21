@@ -1,0 +1,1168 @@
+From 877e012660506575b10b0d80b8e51fe85e8b4c9f Mon Sep 17 00:00:00 2001
+From: rigaz29 <ryanbagas27@gmail.com>
+Date: Sat, 8 Aug 2026 23:59:38 +0000
+Subject: [PATCH 2/2] camera: adaptasi HAL1 ke arsitektur Android 14
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Lanjutan dari 877e7bbcb4, yang baru mengembalikan berkasnya
+(device1/CameraHardwareInterface, api1/CameraClient) tanpa menyambungkannya.
+Kriteria selesai: `m libcameraservice` dan `m cameraserver` rc=0. Tercapai.
+
+CameraProviderManager
+  - case 1: di switch versi mayor HIDL. Tanpa ini provider HAL1 ditolak di
+    addDevice dan kamera tidak pernah terdaftar sama sekali.
+  - openSession() untuk V1_0, mengikuti bentuk openHidlSession. HAL1 tidak
+    memisahkan device dan session, jadi yang dikembalikan antarmuka
+    perangkatnya sendiri.
+
+HidlProviderInfo
+  - HidlDeviceInfo1, menurunkan DeviceInfo langsung. Tidak lewat basis bersama
+    seperti DeviceInfo3 karena HAL1 tidak punya padanan AIDL — A14 hanya
+    mempertahankannya di sisi HIDL.
+  - startDeviceInterface1(): kembaran startDeviceInterface yang memanggil
+    getCameraDeviceInterface_V1_x. Dibuat sebagai metode terpisah, bukan
+    template: dua overload tidak bisa dibedakan hanya oleh tipe kembalian.
+  - initializeHidlDeviceInfo1(), dicabangkan dari initializeDeviceInfo. Versi
+    mayor tidak dioper ke fungsi itu di A14, jadi diambil ulang dari nama
+    perangkat yang memang mengkodekannya.
+
+CameraClient — disesuaikan ke kontrak A14
+  - Konstruktor: String16 -> std::string, tambah cameraIdStr,
+    systemNativeClient, overrideToPortrait. Urutan mengikuti Camera2Client.
+  - initialize(): String8 -> std::string.
+  - CameraServiceProxyWrapper kini objek instance, dioper lewat konstruktor;
+    logClose() bertambah parameter deviceError.
+  - setRotateAndCropOverride() bertambah parameter fromHal — tanpa itu ia
+    menyembunyikan virtual basisnya, bukan meng-override.
+  - Delapan virtual MURNI baru diimplementasikan; tanpa semuanya CameraClient
+    tetap kelas abstrak. Yang bersifat pengaturan diterima-dan-diabaikan;
+    yang menjanjikan kemampuan nyata menjawab jujur INVALID_OPERATION/false.
+    injectCamera khususnya TIDAK boleh menjawab OK.
+
+CameraService
+  - makeClient(): versi 1.0 tidak lagi ditolak dengan ERROR_DEPRECATED_HAL,
+    melainkan membuat CameraClient. Permintaan Camera API2 ke perangkat HAL1
+    ditolak eksplisit, bukan dibiarkan jatuh ke CameraDeviceClient yang
+    mengasumsikan HAL3.
+  - friend class CameraClient: getClientFromCookie() memetakan cookie HAL
+    kembali ke klien lewat mActiveClientManager yang privat.
+
+Perbaikan yang ditemukan lewat compiler, bukan dugaan
+  - String8::string() jadi privat di A14 -> c_str() (29 tempat).
+  - mapToStatusT pindah dari CameraProviderManager ke HidlProviderInfo.
+    Deklarasi lamanya masih ada tapi definisinya tidak, jadi kesalahannya
+    baru muncul saat link, bukan saat kompilasi.
+  - CameraClient.h wajib meng-include device1/CameraHardwareInterface.h:
+    tanpa itu HandleTimestampMessage mengikat ke tipe HIDL yang bernama sama,
+    dan pesan errornya mencetak kedua sisi secara identik.
+  - Konstanta ekstensi QCOM (CAMERA_CMD_HISTOGRAM/METADATA/LONGSHOT,
+    CAMERA_MSG_STATS_DATA/META_DATA) tidak ada di system/core official —
+    hanya UL yang membawanya. Nilai disalin persis dari UL lineage-21.0
+    karena angka-angka itu ABI ke blob kamera. Didefinisikan lokal, bukan
+    dengan menambal system/core, agar seri patch tidak bertambah satu repo.
+
+BELUM diuji di perangkat: kamera baru terbukti saat Fase 8.
+
+Change-Id: I2ef9d75696edf6818609968bb54d881f2f0cbb9a
+---
+ .../camera/libcameraservice/CameraService.cpp |  31 +-
+ .../camera/libcameraservice/CameraService.h   |   3 +
+ .../libcameraservice/api1/CameraClient.cpp    | 106 ++++++-
+ .../libcameraservice/api1/CameraClient.h      |  55 +++-
+ .../common/CameraProviderManager.cpp          |  49 ++++
+ .../common/CameraProviderManager.h            |  12 +
+ .../common/hidl/HidlProviderInfo.cpp          | 265 ++++++++++++++++++
+ .../common/hidl/HidlProviderInfo.h            |  56 ++++
+ .../device1/CameraHardwareInterface.cpp       |  81 +++---
+ 9 files changed, 595 insertions(+), 63 deletions(-)
+
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index 2d55f39b25..9e332018d8 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -78,6 +78,7 @@
+ #include <system/camera.h>
+ 
+ #include "CameraService.h"
++#include "api1/CameraClient.h"
+ #include "api1/Camera2Client.h"
+ #include "api2/CameraDeviceClient.h"
+ #include "utils/CameraTraces.h"
+@@ -1510,16 +1511,18 @@ Status CameraService::makeClient(const sp<CameraService>& cameraService,
+         apiLevel effectiveApiLevel, bool overrideForPerfClass, bool overrideToPortrait,
+         bool forceSlowJpegMode, const std::string& originalCameraId,
+         /*out*/sp<BasicClient>* client) {
++    // HAL1 — dipulihkan untuk perangkat legacy (A37/msm8916). AOSP 14 menolak
++    // versi 1.0 di sini dengan ERROR_DEPRECATED_HAL; kamera A37 hanya punya
++    // jalur HAL1, jadi penolakan itu berarti kamera tidak pernah bisa dibuka.
++    bool isHal1 = false;
++
+     // For HIDL devices
+     if (deviceVersionAndTransport.second == IPCTransport::HIDL) {
+         // Create CameraClient based on device version reported by the HAL.
+         int deviceVersion = deviceVersionAndTransport.first;
+         switch(deviceVersion) {
+             case CAMERA_DEVICE_API_VERSION_1_0:
+-                ALOGE("Camera using old HAL version: %d", deviceVersion);
+-                return STATUS_ERROR_FMT(ERROR_DEPRECATED_HAL,
+-                        "Camera device \"%s\" HAL version %d no longer supported",
+-                        cameraId.c_str(), deviceVersion);
++                isHal1 = true;
+                 break;
+             case CAMERA_DEVICE_API_VERSION_3_0:
+             case CAMERA_DEVICE_API_VERSION_3_1:
+@@ -1538,7 +1541,25 @@ Status CameraService::makeClient(const sp<CameraService>& cameraService,
+                         cameraId.c_str(), deviceVersion);
+         }
+     }
+-    if (effectiveApiLevel == API_1) { // Camera1 API route
++    if (isHal1) {
++        // HAL1 hanya bisa dilayani lewat Camera API1. Permintaan API2 ke
++        // perangkat HAL1 ditolak eksplisit, bukan dibiarkan jatuh ke
++        // CameraDeviceClient yang mengasumsikan HAL3.
++        if (effectiveApiLevel != API_1) {
++            ALOGE("%s: Camera device \"%s\" is HAL1; Camera API2 is not supported on it",
++                    __FUNCTION__, cameraId.c_str());
++            return STATUS_ERROR_FMT(ERROR_DEPRECATED_HAL,
++                    "Camera device \"%s\" is HAL1 and does not support Camera API2",
++                    cameraId.c_str());
++        }
++        sp<ICameraClient> tmp = static_cast<ICameraClient*>(cameraCb.get());
++        *client = new CameraClient(cameraService, tmp, cameraService->mCameraServiceProxyWrapper,
++                packageName, featureId, cameraId,
++                api1CameraId, facing, sensorOrientation,
++                clientPid, clientUid, servicePid, overrideToPortrait);
++        ALOGI("%s: Camera1 API (HAL1, legacy), override to portrait %d",
++                __FUNCTION__, overrideToPortrait);
++    } else if (effectiveApiLevel == API_1) { // Camera1 API route
+         sp<ICameraClient> tmp = static_cast<ICameraClient*>(cameraCb.get());
+         *client = new Camera2Client(cameraService, tmp, cameraService->mCameraServiceProxyWrapper,
+                 packageName, featureId, cameraId,
+diff --git a/services/camera/libcameraservice/CameraService.h b/services/camera/libcameraservice/CameraService.h
+index 8822cd37cf..fb18a8312e 100644
+--- a/services/camera/libcameraservice/CameraService.h
++++ b/services/camera/libcameraservice/CameraService.h
+@@ -81,6 +81,9 @@ class CameraService :
+ {
+     friend class BinderService<CameraService>;
+     friend class CameraOfflineSessionClient;
++    // HAL1: CameraClient::getClientFromCookie() memetakan cookie HAL (id kamera
++    // sebagai integer) kembali ke klien lewat mActiveClientManager, yang privat.
++    friend class CameraClient;
+ public:
+     class Client;
+     class BasicClient;
+diff --git a/services/camera/libcameraservice/api1/CameraClient.cpp b/services/camera/libcameraservice/api1/CameraClient.cpp
+index b88b630bd3..8d960a45bc 100644
+--- a/services/camera/libcameraservice/api1/CameraClient.cpp
++++ b/services/camera/libcameraservice/api1/CameraClient.cpp
+@@ -30,19 +30,49 @@
+ 
+ namespace android {
+ 
++// Ekstensi vendor QCOM untuk Camera HAL1. Di LineageOS-UL konstanta ini ada di
++// system/core/libsystem/include/system/camera.h; LineageOS 21 OFFICIAL tidak
++// memuatnya sama sekali (juga tidak di lineage-20.0 official) — hanya UL yang
++// membawanya. Nilainya disalin persis dari
++// LineageOS-UL/android_system_core lineage-21.0 (CAMERA_CMD_VENDOR_START = 20,
++// CAMERA_MSG_VENDOR_START = 0x1000), karena angka-angka ini adalah ABI antara
++// framework dan blob kamera: menebaknya berarti mengirim perintah yang salah ke
++// HAL.
++//
++// Didefinisikan lokal di sini, BUKAN dengan menambal system/core: satu-satunya
++// pemakainya di seluruh pohon adalah berkas ini, dan menambal system/core akan
++// menyeret satu repo lagi ke seri patch beserta rebuild yang mengikutinya.
++enum {
++    CAMERA_MSG_STATS_DATA       = 0x1000,   // CAMERA_MSG_VENDOR_START
++    CAMERA_MSG_META_DATA        = 0x2000,
++
++    CAMERA_CMD_HISTOGRAM_ON     = 20,       // CAMERA_CMD_VENDOR_START
++    CAMERA_CMD_HISTOGRAM_OFF    = 21,
++    CAMERA_CMD_LONGSHOT_ON      = 23,
++    CAMERA_CMD_LONGSHOT_OFF     = 24,
++    CAMERA_CMD_METADATA_ON      = 26,
++    CAMERA_CMD_METADATA_OFF     = 27,
++};
++
+ #define LOG1(...) ALOGD_IF(gLogLevel >= 1, __VA_ARGS__);
+ #define LOG2(...) ALOGD_IF(gLogLevel >= 2, __VA_ARGS__);
+ 
+ CameraClient::CameraClient(const sp<CameraService>& cameraService,
+         const sp<hardware::ICameraClient>& cameraClient,
+-        const String16& clientPackageName, const std::optional<String16>& clientFeatureId,
+-        int cameraId, int cameraFacing, int sensorOrientation,
+-        int clientPid, int clientUid,
+-        int servicePid):
+-        Client(cameraService, cameraClient, clientPackageName, clientFeatureId,
+-                String8::format("%d", cameraId), cameraId, cameraFacing, sensorOrientation, clientPid,
+-                clientUid, servicePid)
++        std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
++        const std::string& clientPackageName,
++        const std::optional<std::string>& clientFeatureId,
++        const std::string& cameraIdStr,
++        int api1CameraId, int cameraFacing, int sensorOrientation,
++        int clientPid, uid_t clientUid,
++        int servicePid, bool overrideToPortrait):
++        Client(cameraService, cameraClient, clientPackageName,
++                /*systemNativeClient*/ false, clientFeatureId,
++                cameraIdStr, api1CameraId, cameraFacing, sensorOrientation, clientPid,
++                clientUid, servicePid, overrideToPortrait),
++        mCameraServiceProxyWrapper(cameraServiceProxyWrapper)
+ {
++    int cameraId = api1CameraId;
+     int callingPid = CameraThreadState::getCallingPid();
+     LOG1("CameraClient::CameraClient E (pid %d, id %d)", callingPid, cameraId);
+ 
+@@ -63,7 +93,7 @@ CameraClient::CameraClient(const sp<CameraService>& cameraService,
+ }
+ 
+ status_t CameraClient::initialize(sp<CameraProviderManager> manager,
+-        const String8& /*monitorTags*/) {
++        const std::string& /*monitorTags*/) {
+     int callingPid = CameraThreadState::getCallingPid();
+     status_t res;
+ 
+@@ -285,7 +315,7 @@ binder::Status CameraClient::disconnect() {
+ 
+     LOG1("disconnect X (pid %d)", callingPid);
+     int32_t closeLatencyMs = ns2ms(systemTime() - startTime);
+-    CameraServiceProxyWrapper::logClose(mCameraIdStr, closeLatencyMs);
++    mCameraServiceProxyWrapper->logClose(mCameraIdStr, closeLatencyMs, /*deviceError*/ false);
+     return res;
+ }
+ 
+@@ -694,7 +724,7 @@ status_t CameraClient::takePicture(int msgType) {
+ 
+ // set preview/capture parameters - key/value pairs
+ status_t CameraClient::setParameters(const String8& params) {
+-    LOG1("setParameters (pid %d) (%s)", CameraThreadState::getCallingPid(), params.string());
++    LOG1("setParameters (pid %d) (%s)", CameraThreadState::getCallingPid(), params.c_str());
+ 
+     Mutex::Autolock lock(mLock);
+     status_t result = checkPidAndHardware();
+@@ -714,7 +744,7 @@ String8 CameraClient::getParameters() const {
+     }
+ 
+     String8 params(mHardware->getParameters().flatten());
+-    LOG1("getParameters (pid %d) (%s)", CameraThreadState::getCallingPid(), params.string());
++    LOG1("getParameters (pid %d) (%s)", CameraThreadState::getCallingPid(), params.c_str());
+     return params;
+ }
+ 
+@@ -830,7 +860,7 @@ bool CameraClient::lockIfMessageWanted(int32_t msgType) {
+ }
+ 
+ sp<CameraClient> CameraClient::getClientFromCookie(void* user) {
+-    String8 cameraId = String8::format("%d", (int)(intptr_t) user);
++    std::string cameraId = std::to_string((int)(intptr_t) user);
+     auto clientDescriptor = sCameraService->mActiveClientManager.get(cameraId);
+     if (clientDescriptor != nullptr) {
+         return sp<CameraClient>{
+@@ -1241,10 +1271,60 @@ int32_t CameraClient::getGlobalAudioRestriction() {
+ }
+ 
+ // API1->Device1 does not support this feature
+-status_t CameraClient::setRotateAndCropOverride(uint8_t /*rotateAndCrop*/) {
++status_t CameraClient::setRotateAndCropOverride(uint8_t /*rotateAndCrop*/, bool /*fromHal*/) {
++    return OK;
++}
++
++// HAL1 tidak punya konsep autoframing. Sama seperti setRotateAndCropOverride,
++// permintaannya diterima lalu diabaikan supaya klien tidak melihat kegagalan.
++status_t CameraClient::setAutoframingOverride(uint8_t /*autoframingValue*/) {
+     return OK;
+ }
+ 
++// ----------------------------------------------------------------------------
++// Kemampuan khusus HAL3. HAL1 tidak punya padanannya, jadi yang bersifat
++// "pengaturan" diterima-dan-diabaikan (OK), sedangkan yang menjanjikan
++// kemampuan nyata menjawab jujur: false / INVALID_OPERATION. Injeksi kamera
++// khususnya TIDAK boleh mengembalikan OK — pemanggilnya akan mengira sesi
++// pengganti sudah aktif.
++// ----------------------------------------------------------------------------
++
++status_t CameraClient::setCameraServiceWatchdog(bool /*enabled*/) {
++    return OK;
++}
++
++void CameraClient::setStreamUseCaseOverrides(
++        const std::vector<int64_t>& /*useCaseOverrides*/) {
++}
++
++void CameraClient::clearStreamUseCaseOverrides() {
++}
++
++bool CameraClient::supportsZoomOverride() {
++    return false;
++}
++
++status_t CameraClient::setZoomOverride(int32_t /*zoomOverride*/) {
++    return INVALID_OPERATION;
++}
++
++status_t CameraClient::injectCamera(const std::string& /*injectedCamId*/,
++        sp<CameraProviderManager> /*manager*/) {
++    ALOGE("%s: HAL1 does not support camera injection", __FUNCTION__);
++    return INVALID_OPERATION;
++}
++
++status_t CameraClient::stopInjection() {
++    ALOGE("%s: HAL1 does not support camera injection", __FUNCTION__);
++    return INVALID_OPERATION;
++}
++
++status_t CameraClient::injectSessionParams(
++        const hardware::camera2::impl::CameraMetadataNative& /*sessionParams*/) {
++    ALOGE("%s: HAL1 does not support injecting session parameters", __FUNCTION__);
++    return INVALID_OPERATION;
++}
++
+ bool CameraClient::supportsCameraMute() {
+     return false;
+ }
+diff --git a/services/camera/libcameraservice/api1/CameraClient.h b/services/camera/libcameraservice/api1/CameraClient.h
+index c94bec559f..5184749d6b 100644
+--- a/services/camera/libcameraservice/api1/CameraClient.h
++++ b/services/camera/libcameraservice/api1/CameraClient.h
+@@ -18,6 +18,13 @@
+ #define ANDROID_SERVERS_CAMERA_CAMERACLIENT_H
+ 
+ #include "CameraService.h"
++// WAJIB, bukan sekadar kerapian. Tanpa ini HandleTimestampMessage di bawah
++// mengikat ke hardware::camera::device::V1_0::HandleTimestampMessage (tertarik
++// lewat include lain), sedangkan CameraClient.cpp memakai android::
++// HandleTimestampMessage dari header ini. Keduanya bernama sama tapi tipe
++// berbeda, sehingga pemasangan data_callback_timestamp_batch ditolak dengan
++// pesan "type mismatch at 2nd parameter" yang kedua sisinya tercetak identik.
++#include "device1/CameraHardwareInterface.h"
+ 
+ namespace android {
+ 
+@@ -62,26 +69,56 @@ public:
+     virtual status_t        setAudioRestriction(int mode);
+     virtual int32_t         getGlobalAudioRestriction();
+ 
+-    virtual status_t        setRotateAndCropOverride(uint8_t override);
++    // A14 menambah parameter fromHal (CameraService.h:389). Tanpa itu metode ini
++    // menyembunyikan virtual basisnya, bukan meng-override-nya.
++    virtual status_t        setRotateAndCropOverride(uint8_t override, bool fromHal = false);
++    // Autoframing tidak ada di HAL1; deklarasikan agar tidak menyembunyikan
++    // virtual murni di BasicClient.
++    virtual status_t        setAutoframingOverride(uint8_t autoframingValue);
+ 
+     virtual bool            supportsCameraMute();
+     virtual status_t        setCameraMute(bool enabled);
+ 
++    // Kemampuan yang diperkenalkan untuk jalur HAL3 dan tidak punya padanan di
++    // HAL1. Semuanya WAJIB diimplementasikan: di Android 14 mereka virtual MURNI
++    // di BasicClient, jadi tanpa ini CameraClient tetap kelas abstrak dan
++    // "new CameraClient" ditolak compiler.
++    virtual status_t        setCameraServiceWatchdog(bool enabled);
++    virtual void            setStreamUseCaseOverrides(
++                                    const std::vector<int64_t>& useCaseOverrides);
++    virtual void            clearStreamUseCaseOverrides();
++    virtual bool            supportsZoomOverride();
++    virtual status_t        setZoomOverride(int32_t zoomOverride);
++    virtual status_t        injectCamera(const std::string& injectedCamId,
++                                    sp<CameraProviderManager> manager);
++    virtual status_t        stopInjection();
++    virtual status_t        injectSessionParams(
++                                    const hardware::camera2::impl::CameraMetadataNative&
++                                            sessionParams);
++
+     // Interface used by CameraService
++    // Tanda tangan disesuaikan ke kontrak Android 14: String16 -> std::string,
++    // ditambah cameraIdStr, systemNativeClient, dan overrideToPortrait. Pola
++    // dan urutan argumennya mengikuti Camera2Client, klien API1 untuk HAL3.
+     CameraClient(const sp<CameraService>& cameraService,
+             const sp<hardware::ICameraClient>& cameraClient,
+-            const String16& clientPackageName,
+-            const std::optional<String16>& clientFeatureId,
+-            int cameraId,
++            std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
++            const std::string& clientPackageName,
++            const std::optional<std::string>& clientFeatureId,
++            const std::string& cameraIdStr,
++            int api1CameraId,
+             int cameraFacing,
+             int sensorOrientation,
+             int clientPid,
+-            int clientUid,
+-            int servicePid);
++            uid_t clientUid,
++            int servicePid,
++            bool overrideToPortrait);
+     ~CameraClient();
+ 
++    // A14 mengganti String8 -> std::string di BasicClient::initialize
++    // (CameraService.h:323).
+     virtual status_t initialize(sp<CameraProviderManager> manager,
+-            const String8& monitorTags) override;
++            const std::string& monitorTags) override;
+ 
+     virtual status_t dump(int fd, const Vector<String16>& args);
+ 
+@@ -144,6 +181,10 @@ private:
+         const sp<ANativeWindow>& window);
+ 
+ 
++    // A14 mengubah CameraServiceProxyWrapper dari kumpulan metode static jadi
++    // objek instance yang dioper lewat konstruktor (lihat Camera2Client).
++    std::shared_ptr<CameraServiceProxyWrapper> mCameraServiceProxyWrapper;
++
+     // these are initialized in the constructor.
+     sp<CameraHardwareInterface>     mHardware;       // cleared after disconnect()
+     int                             mPreviewCallbackFlag;
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.cpp b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+index 15e2755a98..0555e7d74f 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.cpp
++++ b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+@@ -884,6 +884,51 @@ status_t CameraProviderManager::openHidlSession(const std::string &id,
+     return HidlProviderInfo::mapToStatusT(status);
+ }
+ 
++// HAL1 — dipanggil CameraHardwareInterface::initialize(). Bentuknya mengikuti
++// openHidlSession di atas; bedanya HAL1 tidak punya objek "session" terpisah,
++// jadi yang dikembalikan adalah antarmuka perangkatnya sendiri.
++status_t CameraProviderManager::openSession(const std::string &id,
++        const sp<device::V1_0::ICameraDeviceCallback>& callback,
++        /*out*/
++        sp<device::V1_0::ICameraDevice> *session) {
++
++    std::lock_guard<std::mutex> lock(mInterfaceMutex);
++
++    auto deviceInfo = findDeviceInfoLocked(id);
++    if (deviceInfo == nullptr) return NAME_NOT_FOUND;
++
++    auto *hidlDeviceInfo1 = static_cast<HidlProviderInfo::HidlDeviceInfo1*>(deviceInfo);
++    sp<ProviderInfo> parentProvider = deviceInfo->mParentProvider.promote();
++    if (parentProvider == nullptr) {
++        return DEAD_OBJECT;
++    }
++    const sp<provider::V2_4::ICameraProvider> provider =
++            static_cast<HidlProviderInfo *>(parentProvider.get())->startProviderInterface();
++    if (provider == nullptr) {
++        return DEAD_OBJECT;
++    }
++    std::shared_ptr<HalCameraProvider> halCameraProvider =
++            std::make_shared<HidlHalCameraProvider>(provider, provider->descriptor);
++    saveRef(DeviceMode::CAMERA, id, halCameraProvider);
++
++    auto interface = hidlDeviceInfo1->startDeviceInterface();
++    if (interface == nullptr) {
++        return DEAD_OBJECT;
++    }
++
++    hardware::Return<Status> status = interface->open(callback);
++    if (!status.isOk()) {
++        removeRef(DeviceMode::CAMERA, id);
++        ALOGE("%s: Transaction error opening a session for camera device %s: %s",
++                __FUNCTION__, id.c_str(), status.description().c_str());
++        return DEAD_OBJECT;
++    }
++    if (status == Status::OK) {
++        *session = interface;
++    }
++    return HidlProviderInfo::mapToStatusT(status);
++}
++
+ void CameraProviderManager::saveRef(DeviceMode usageType, const std::string &cameraId,
+         std::shared_ptr<HalCameraProvider> provider) {
+     if (!kEnableLazyHal) {
+@@ -2357,6 +2402,10 @@ status_t CameraProviderManager::ProviderInfo::addDevice(
+     switch (transport) {
+         case IPCTransport::HIDL:
+             switch (major) {
++                // HAL1 — dipulihkan untuk perangkat legacy (A37/msm8916). Tanpa
++                // baris ini provider HAL1 ditolak di sini dan kamera tidak
++                // pernah terdaftar sama sekali ("0 camera devices").
++                case 1:
+                 case 3:
+                     break;
+                 default:
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.h b/services/camera/libcameraservice/common/CameraProviderManager.h
+index 5ff3fcd3da..30d60892b7 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.h
++++ b/services/camera/libcameraservice/common/CameraProviderManager.h
+@@ -414,6 +414,18 @@ public:
+             /*out*/
+             sp<hardware::camera::device::V3_2::ICameraDeviceSession> *session);
+ 
++    /**
++     * HAL1 — buka sesi ke perangkat kamera legacy.
++     *
++     * Berbeda dari HAL3, HAL1 tidak memisahkan device dan session: yang
++     * dikembalikan adalah antarmuka perangkatnya sendiri. Dipakai
++     * CameraHardwareInterface::initialize().
++     */
++    status_t openSession(const std::string &id,
++            const sp<hardware::camera::device::V1_0::ICameraDeviceCallback>& callback,
++            /*out*/
++            sp<hardware::camera::device::V1_0::ICameraDevice> *session);
++
+     /**
+      * Notify that the camera or torch is no longer being used by a camera client
+      */
+diff --git a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
+index 065f0c5569..f1bf2223d3 100644
+--- a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
++++ b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
+@@ -348,6 +348,36 @@ HidlProviderInfo::startDeviceInterface(const std::string &name) {
+     return cameraInterface;
+ }
+ 
++// HAL1 — kembaran startDeviceInterface di atas. Satu-satunya perbedaan:
++// getCameraDeviceInterface_V1_x, dan callback-nya tidak membawa Status
++// (HAL1 mengembalikan device atau nullptr).
++sp<device::V1_0::ICameraDevice>
++HidlProviderInfo::startDeviceInterface1(const std::string &name) {
++    Status status;
++    sp<device::V1_0::ICameraDevice> cameraInterface;
++    hardware::Return<void> ret;
++    const sp<provider::V2_4::ICameraProvider> interface = startProviderInterface();
++    if (interface == nullptr) {
++        return nullptr;
++    }
++    ret = interface->getCameraDeviceInterface_V1_x(name, [&status, &cameraInterface](
++        Status s, sp<device::V1_0::ICameraDevice> interface) {
++                status = s;
++                cameraInterface = interface;
++            });
++    if (!ret.isOk()) {
++        ALOGE("%s: Transaction error trying to obtain interface for camera device %s: %s",
++                __FUNCTION__, name.c_str(), ret.description().c_str());
++        return nullptr;
++    }
++    if (status != Status::OK) {
++        ALOGE("%s: Unable to obtain interface for camera device %s: %s", __FUNCTION__,
++                name.c_str(), statusToString(status));
++        return nullptr;
++    }
++    return cameraInterface;
++}
++
+ bool HidlProviderInfo::successfullyStartedProviderInterface() {
+     return startProviderInterface() != nullptr;
+ }
+@@ -459,6 +489,18 @@ std::unique_ptr<CameraProviderManager::ProviderInfo::DeviceInfo>
+         const std::string &id, uint16_t minorVersion) {
+     Status status;
+ 
++    // Cabang HAL1. Versi mayor tidak ikut dioper ke fungsi ini (A14 hanya
++    // mengirim minorVersion), jadi ia diambil ulang dari nama perangkat —
++    // nama itu memang mengkodekan "device@<major>.<minor>/<type>/<id>".
++    {
++        uint16_t major = 0, parsedMinor = 0;
++        std::string parsedType, parsedId;
++        if (parseDeviceName(name, &major, &parsedMinor, &parsedType, &parsedId) == OK &&
++                major == 1) {
++            return initializeHidlDeviceInfo1(name, tagId, id, minorVersion);
++        }
++    }
++
+     auto cameraInterface = startDeviceInterface(name);
+     if (cameraInterface == nullptr) return nullptr;
+ 
+@@ -490,6 +532,229 @@ std::unique_ptr<CameraProviderManager::ProviderInfo::DeviceInfo>
+                 this, mProviderPublicCameraIds, cameraInterface));
+ }
+ 
++// HAL1 — kembaran initializeDeviceInfo. Strukturnya sengaja dibuat sama persis
++// (ambil antarmuka, baca resource cost, terjemahkan nama perangkat konflik jadi
++// id) supaya perbedaannya mudah dilihat: hanya tipe antarmuka dan DeviceInfo
++// yang dihasilkan.
++std::unique_ptr<CameraProviderManager::ProviderInfo::DeviceInfo>
++    HidlProviderInfo::initializeHidlDeviceInfo1(
++        const std::string &name, const metadata_vendor_id_t tagId,
++        const std::string &id, uint16_t minorVersion) {
++    Status status;
++
++    auto cameraInterface = startDeviceInterface1(name);
++    if (cameraInterface == nullptr) return nullptr;
++
++    common::V1_0::CameraResourceCost resourceCost;
++    cameraInterface->getResourceCost([&status, &resourceCost](
++        Status s, common::V1_0::CameraResourceCost cost) {
++                status = s;
++                resourceCost = cost;
++            });
++    if (status != Status::OK) {
++        ALOGE("%s: Unable to obtain resource costs for camera device %s: %s", __FUNCTION__,
++                name.c_str(), statusToString(status));
++        return nullptr;
++    }
++
++    for (auto& conflictName : resourceCost.conflictingDevices) {
++        uint16_t major, minor;
++        std::string type, conflictId;
++        status_t res = parseDeviceName(conflictName, &major, &minor, &type, &conflictId);
++        if (res != OK) {
++            ALOGE("%s: Failed to parse conflicting device %s", __FUNCTION__, conflictName.c_str());
++            return nullptr;
++        }
++        conflictName = conflictId;
++    }
++
++    return std::unique_ptr<DeviceInfo>(
++        new HidlDeviceInfo1(name, tagId, id, minorVersion, HalToFrameworkResourceCost(resourceCost),
++                this, mProviderPublicCameraIds, cameraInterface));
++}
++
++HidlProviderInfo::HidlDeviceInfo1::HidlDeviceInfo1(const std::string& name,
++        const metadata_vendor_id_t tagId, const std::string &id,
++        uint16_t minorVersion,
++        const CameraResourceCost& resourceCost,
++        sp<ProviderInfo> parentProvider,
++        const std::vector<std::string>& publicCameraIds,
++        sp<InterfaceT> interface) :
++        DeviceInfo(name, tagId, id, hardware::hidl_version{1, minorVersion},
++                   publicCameraIds, resourceCost, parentProvider) {
++    // Membaca parameter default dan ketersediaan flash menuntut perangkat
++    // dinyalakan sebentar, lalu ditutup lagi.
++    hardware::Return<Status> status = interface->open(nullptr);
++    if (!status.isOk()) {
++        ALOGE("%s: Transaction error opening camera device %s to check for a flash unit: %s",
++                __FUNCTION__, id.c_str(), status.description().c_str());
++        return;
++    }
++    if (status != Status::OK) {
++        ALOGE("%s: Unable to open camera device %s to check for a flash unit: %s", __FUNCTION__,
++                id.c_str(), statusToString(status));
++        return;
++    }
++    hardware::Return<void> ret;
++    ret = interface->getParameters([this](const hardware::hidl_string& parms) {
++                mDefaultParameters.unflatten(String8(parms.c_str()));
++            });
++    if (!ret.isOk()) {
++        ALOGE("%s: Transaction error reading camera device %s params to check for a flash unit: %s",
++                __FUNCTION__, id.c_str(), status.description().c_str());
++        return;
++    }
++    const char *flashMode =
++            mDefaultParameters.get(CameraParameters::KEY_SUPPORTED_FLASH_MODES);
++    if (flashMode && strstr(flashMode, CameraParameters::FLASH_MODE_TORCH)) {
++        mHasFlashUnit = true;
++    }
++
++    status_t res = cacheCameraInfo(interface);
++    if (res != OK) {
++        ALOGE("%s: Could not cache CameraInfo", __FUNCTION__);
++        return;
++    }
++
++    ret = interface->close();
++    if (!ret.isOk()) {
++        ALOGE("%s: Transaction error closing camera device %s after check for a flash unit: %s",
++                __FUNCTION__, id.c_str(), status.description().c_str());
++    }
++
++    if (!kEnableLazyHal) {
++        // Simpan referensi HAL selamanya
++        mSavedInterface = interface;
++    }
++}
++
++status_t HidlProviderInfo::HidlDeviceInfo1::setTorchMode(bool enabled) {
++    using hardware::camera::common::V1_0::TorchMode;
++    const sp<InterfaceT> interface = startDeviceInterface();
++    if (interface == nullptr) {
++        return DEAD_OBJECT;
++    }
++    Status s = interface->setTorchMode(enabled ? TorchMode::ON : TorchMode::OFF);
++    return mapToStatusT(s);
++}
++
++status_t HidlProviderInfo::HidlDeviceInfo1::turnOnTorchWithStrengthLevel(
++        int32_t /*torchStrengthLevel*/) {
++    ALOGE("%s HAL1 does not support turning on torch with variable strength", __FUNCTION__);
++    return INVALID_OPERATION;
++}
++
++status_t HidlProviderInfo::HidlDeviceInfo1::getTorchStrengthLevel(int32_t * /*torchStrength*/) {
++    ALOGE("%s HAL1 does not support variable torch strength level", __FUNCTION__);
++    return INVALID_OPERATION;
++}
++
++status_t HidlProviderInfo::HidlDeviceInfo1::filterSmallJpegSizes() {
++    return OK;
++}
++
++status_t HidlProviderInfo::HidlDeviceInfo1::getCameraInfo(
++        bool overrideToPortrait, int *portraitRotation,
++        hardware::CameraInfo *info) const {
++    if (info == nullptr) return BAD_VALUE;
++    *info = mInfo;
++
++    // Perlakuan overrideToPortrait disamakan dengan DeviceInfo3 supaya perangkat
++    // HAL1 tidak berperilaku lain di jalur yang sama.
++    if (overrideToPortrait && (info->orientation == 0 || info->orientation == 180)) {
++        *portraitRotation = 90;
++        if (info->facing == hardware::CAMERA_FACING_FRONT) {
++            info->orientation = (360 + info->orientation - 90) % 360;
++        } else {
++            info->orientation = (360 + info->orientation + 90) % 360;
++        }
++    } else {
++        *portraitRotation = 0;
++    }
++
++    return OK;
++}
++
++status_t HidlProviderInfo::HidlDeviceInfo1::cacheCameraInfo(
++        sp<HidlProviderInfo::HidlDeviceInfo1::InterfaceT> interface) {
++    Status status;
++    device::V1_0::CameraInfo cInfo;
++    hardware::Return<void> ret;
++    ret = interface->getCameraInfo([&status, &cInfo](Status s, device::V1_0::CameraInfo camInfo) {
++                status = s;
++                cInfo = camInfo;
++            });
++    if (!ret.isOk()) {
++        ALOGE("%s: Transaction error reading camera info from device %s: %s",
++                __FUNCTION__, mId.c_str(), ret.description().c_str());
++        return DEAD_OBJECT;
++    }
++    if (status != Status::OK) {
++        return mapToStatusT(status);
++    }
++
++    switch(cInfo.facing) {
++        case device::V1_0::CameraFacing::BACK:
++            mInfo.facing = hardware::CAMERA_FACING_BACK;
++            break;
++        case device::V1_0::CameraFacing::EXTERNAL:
++            // Perangkat eksternal dipetakan ke depan untuk API lama
++        case device::V1_0::CameraFacing::FRONT:
++            mInfo.facing = hardware::CAMERA_FACING_FRONT;
++            break;
++        default:
++            ALOGW("%s: Device %s: Unknown camera facing: %d",
++                    __FUNCTION__, mId.c_str(), cInfo.facing);
++            mInfo.facing = hardware::CAMERA_FACING_BACK;
++    }
++    mInfo.orientation = cInfo.orientation;
++
++    return OK;
++}
++
++sp<HidlProviderInfo::HidlDeviceInfo1::InterfaceT>
++HidlProviderInfo::HidlDeviceInfo1::startDeviceInterface() {
++    Mutex::Autolock l(mDeviceAvailableLock);
++    sp<InterfaceT> device;
++    ATRACE_CALL();
++    if (mSavedInterface == nullptr) {
++        sp<HidlProviderInfo> parentProvider =
++                static_cast<HidlProviderInfo *>(mParentProvider.promote().get());
++        if (parentProvider != nullptr) {
++            // Tunggu HAL lazy memastikan perangkat tersedia
++            if (parentProvider->isExternalLazyHAL() && !mIsDeviceAvailable) {
++                ALOGV("%s: Wait for external device to become available %s",
++                      __FUNCTION__, mId.c_str());
++                auto res = mDeviceAvailableSignal.waitRelative(mDeviceAvailableLock,
++                                                         kDeviceAvailableTimeout);
++                if (res != OK) {
++                    ALOGE("%s: Failed waiting for device to become available", __FUNCTION__);
++                    return nullptr;
++                }
++            }
++            device = parentProvider->startDeviceInterface1(mName);
++        }
++    } else {
++        device = (InterfaceT *) mSavedInterface.get();
++    }
++    return device;
++}
++
++status_t HidlProviderInfo::HidlDeviceInfo1::dumpState(int fd) {
++    native_handle_t* handle = native_handle_create(1, 0);
++    handle->data[0] = fd;
++    const sp<InterfaceT> interface = startDeviceInterface();
++    if (interface == nullptr) {
++        return DEAD_OBJECT;
++    }
++    hardware::Return<Status> s = interface->dumpState(handle);
++    native_handle_delete(handle);
++    if (!s.isOk()) {
++        return INVALID_OPERATION;
++    }
++    return mapToStatusT(s);
++}
++
+ status_t HidlProviderInfo::reCacheConcurrentStreamingCameraIdsLocked() {
+     if (mMinorVersion < 6) {
+       // Unsupported operation, nothing to do here
+diff --git a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.h b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.h
+index 869bba05b4..910e4b2a8a 100644
+--- a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.h
++++ b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.h
+@@ -19,6 +19,11 @@
+ 
+ #include "common/CameraProviderManager.h"
+ 
++// HAL1 — jalur legacy. Antarmuka HIDL-nya masih ada di Android 14
++// (hardware/interfaces/camera/device/1.0), yang dicabut hanya sisi
++// frameworks-nya. Lihat HidlDeviceInfo1 di bawah.
++#include <android/hardware/camera/device/1.0/ICameraDevice.h>
++
+ namespace android {
+ 
+ struct HidlProviderInfo : public CameraProviderManager::ProviderInfo,
+@@ -68,6 +73,14 @@ struct HidlProviderInfo : public CameraProviderManager::ProviderInfo,
+     sp<hardware::camera::device::V3_2::ICameraDevice>
+             startDeviceInterface(const std::string &deviceName);
+ 
++    // Padanan HAL1 dari startDeviceInterface. Dibuat sebagai metode terpisah,
++    // BUKAN template: di C++ dua overload tidak bisa dibedakan hanya oleh tipe
++    // kembalian, dan mentemplate versi V3_2 akan memaksa definisinya pindah ke
++    // header padahal ia dipakai di banyak tempat. Perbedaannya cuma satu
++    // panggilan: getCameraDeviceInterface_V1_x, bukan _V3_x.
++    sp<hardware::camera::device::V1_0::ICameraDevice>
++            startDeviceInterface1(const std::string &deviceName);
++
+     // ICameraProviderCallbacks interface - these lock the parent mInterfaceMutex
+     hardware::Return<void> cameraDeviceStatusChange(
+             const hardware::hidl_string& ,
+@@ -111,11 +124,54 @@ struct HidlProviderInfo : public CameraProviderManager::ProviderInfo,
+         sp<hardware::camera::device::V3_2::ICameraDevice> startDeviceInterface();
+     };
+ 
++    // HAL1 — dipulihkan untuk perangkat legacy (A37/msm8916). Tidak ada
++    // padanan AIDL-nya: Android 14 hanya mempertahankan HAL1 di sisi HIDL
++    // (hardware/interfaces/camera/device/1.0 masih ada), jadi struct ini
++    // menurunkan DeviceInfo langsung, bukan lewat basis bersama seperti
++    // DeviceInfo3.
++    struct HidlDeviceInfo1 : public CameraProviderManager::ProviderInfo::DeviceInfo {
++        typedef hardware::camera::device::V1_0::ICameraDevice InterfaceT;
++
++        const hardware::hidl_version mVersion = hardware::hidl_version{1, 0};
++        sp<IBase> mSavedInterface = nullptr;
++
++        HidlDeviceInfo1(const std::string& , const metadata_vendor_id_t ,
++                const std::string &, uint16_t ,
++                const CameraResourceCost& ,
++                sp<ProviderInfo> ,
++                const std::vector<std::string>& ,
++                sp<InterfaceT>);
++
++        ~HidlDeviceInfo1() {}
++
++        virtual status_t setTorchMode(bool enabled) override;
++        virtual status_t turnOnTorchWithStrengthLevel(int32_t torchStrength) override;
++        virtual status_t getTorchStrengthLevel(int32_t *torchStrength) override;
++        virtual status_t getCameraInfo(bool overrideToPortrait, int *portraitRotation,
++                hardware::CameraInfo *info) const override;
++        // HAL1 menurut definisinya kompatibel dengan Camera API1.
++        virtual bool isAPI1Compatible() const override { return true; }
++        virtual status_t dumpState(int fd) override;
++        virtual status_t filterSmallJpegSizes() override;
++
++        sp<InterfaceT> startDeviceInterface();
++
++      private:
++        CameraParameters2 mDefaultParameters;
++        status_t cacheCameraInfo(sp<InterfaceT> interface);
++    };
++
+  private:
+ 
+     virtual std::unique_ptr<DeviceInfo> initializeDeviceInfo(const std::string &,
+             const metadata_vendor_id_t , const std::string &,
+             uint16_t ) override;
++
++    // Cabang HAL1 dari initializeDeviceInfo, dipisah agar fungsi induknya tetap
++    // terbaca dan cabang V3 tidak berubah bentuk.
++    std::unique_ptr<DeviceInfo> initializeHidlDeviceInfo1(const std::string &,
++            const metadata_vendor_id_t , const std::string &,
++            uint16_t );
+     virtual status_t reCacheConcurrentStreamingCameraIdsLocked() override;
+ 
+     //Expects to have mLock locked
+diff --git a/services/camera/libcameraservice/device1/CameraHardwareInterface.cpp b/services/camera/libcameraservice/device1/CameraHardwareInterface.cpp
+index 9d6aeecce2..6b64d375b3 100644
+--- a/services/camera/libcameraservice/device1/CameraHardwareInterface.cpp
++++ b/services/camera/libcameraservice/device1/CameraHardwareInterface.cpp
+@@ -19,6 +19,11 @@
+ #include <inttypes.h>
+ #include <media/hardware/HardwareAPI.h> // For VideoNativeHandleMetadata
+ #include "CameraHardwareInterface.h"
++// A14 memindahkan mapToStatusT dari CameraProviderManager ke HidlProviderInfo
++// saat memisahkan jalur HIDL dan AIDL. Deklarasinya masih ada di
++// CameraProviderManager, tapi definisinya tidak — memanggil yang lama lolos
++// kompilasi lalu gagal saat link ("undefined symbol ... mapToStatusT").
++#include "common/hidl/HidlProviderInfo.h"
+ 
+ namespace android {
+ 
+@@ -28,7 +33,7 @@ using hardware::hidl_handle;
+ 
+ CameraHardwareInterface::~CameraHardwareInterface()
+ {
+-    ALOGI("Destroying camera %s", mName.string());
++    ALOGI("Destroying camera %s", mName.c_str());
+     if (mHidlDevice != nullptr) {
+         mHidlDevice->close();
+         mHidlDevice.clear();
+@@ -37,9 +42,9 @@ CameraHardwareInterface::~CameraHardwareInterface()
+ }
+ 
+ status_t CameraHardwareInterface::initialize(sp<CameraProviderManager> manager) {
+-    ALOGI("Opening camera %s", mName.string());
++    ALOGI("Opening camera %s", mName.c_str());
+ 
+-    status_t ret = manager->openSession(mName.string(), this, &mHidlDevice);
++    status_t ret = manager->openSession(mName.c_str(), this, &mHidlDevice);
+     if (ret != OK) {
+         ALOGE("%s: openSession failed! %s (%d)", __FUNCTION__, strerror(-ret), ret);
+     }
+@@ -449,7 +454,7 @@ CameraHardwareInterface::setTimestamp(int64_t timestamp) {
+ 
+ status_t CameraHardwareInterface::setPreviewWindow(const sp<ANativeWindow>& buf)
+ {
+-    ALOGV("%s(%s) buf %p", __FUNCTION__, mName.string(), buf.get());
++    ALOGV("%s(%s) buf %p", __FUNCTION__, mName.c_str(), buf.get());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         mPreviewWindow = buf;
+         if (buf != nullptr) {
+@@ -460,7 +465,7 @@ status_t CameraHardwareInterface::setPreviewWindow(const sp<ANativeWindow>& buf)
+                 setPreviewTransform(mPreviewTransform);
+             }
+         }
+-        return CameraProviderManager::mapToStatusT(
++        return HidlProviderInfo::mapToStatusT(
+                 mHidlDevice->setPreviewWindow(buf.get() ? this : nullptr));
+     }
+     return INVALID_OPERATION;
+@@ -478,12 +483,12 @@ void CameraHardwareInterface::setCallbacks(notify_callback notify_cb,
+     mDataCbTimestampBatch = data_cb_timestamp_batch;
+     mCbUser = user;
+ 
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+ }
+ 
+ void CameraHardwareInterface::enableMsgType(int32_t msgType)
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         mHidlDevice->enableMsgType(msgType);
+     }
+@@ -491,7 +496,7 @@ void CameraHardwareInterface::enableMsgType(int32_t msgType)
+ 
+ void CameraHardwareInterface::disableMsgType(int32_t msgType)
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         mHidlDevice->disableMsgType(msgType);
+     }
+@@ -499,7 +504,7 @@ void CameraHardwareInterface::disableMsgType(int32_t msgType)
+ 
+ int CameraHardwareInterface::msgTypeEnabled(int32_t msgType)
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         return mHidlDevice->msgTypeEnabled(msgType);
+     }
+@@ -508,9 +513,9 @@ int CameraHardwareInterface::msgTypeEnabled(int32_t msgType)
+ 
+ status_t CameraHardwareInterface::startPreview()
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+-        return CameraProviderManager::mapToStatusT(
++        return HidlProviderInfo::mapToStatusT(
+                 mHidlDevice->startPreview());
+     }
+     return INVALID_OPERATION;
+@@ -518,7 +523,7 @@ status_t CameraHardwareInterface::startPreview()
+ 
+ void CameraHardwareInterface::stopPreview()
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         mHidlDevice->stopPreview();
+     }
+@@ -526,7 +531,7 @@ void CameraHardwareInterface::stopPreview()
+ 
+ int CameraHardwareInterface::previewEnabled()
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         return mHidlDevice->previewEnabled();
+     }
+@@ -535,9 +540,9 @@ int CameraHardwareInterface::previewEnabled()
+ 
+ status_t CameraHardwareInterface::storeMetaDataInBuffers(int enable)
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+-        return CameraProviderManager::mapToStatusT(
++        return HidlProviderInfo::mapToStatusT(
+                 mHidlDevice->storeMetaDataInBuffers(enable));
+     }
+     return enable ? INVALID_OPERATION: OK;
+@@ -545,9 +550,9 @@ status_t CameraHardwareInterface::storeMetaDataInBuffers(int enable)
+ 
+ status_t CameraHardwareInterface::startRecording()
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+-        return CameraProviderManager::mapToStatusT(
++        return HidlProviderInfo::mapToStatusT(
+                 mHidlDevice->startRecording());
+     }
+     return INVALID_OPERATION;
+@@ -558,7 +563,7 @@ status_t CameraHardwareInterface::startRecording()
+  */
+ void CameraHardwareInterface::stopRecording()
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         mHidlDevice->stopRecording();
+     }
+@@ -569,7 +574,7 @@ void CameraHardwareInterface::stopRecording()
+  */
+ int CameraHardwareInterface::recordingEnabled()
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         return mHidlDevice->recordingEnabled();
+     }
+@@ -578,7 +583,7 @@ int CameraHardwareInterface::recordingEnabled()
+ 
+ void CameraHardwareInterface::releaseRecordingFrame(const sp<IMemory>& mem)
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     ssize_t offset;
+     size_t size;
+     sp<IMemoryHeap> heap = mem->getMemory(&offset, &size);
+@@ -609,7 +614,7 @@ void CameraHardwareInterface::releaseRecordingFrame(const sp<IMemory>& mem)
+ 
+ void CameraHardwareInterface::releaseRecordingFrameBatch(const std::vector<sp<IMemory>>& frames)
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     size_t n = frames.size();
+     std::vector<VideoFrameMessage> msgs;
+     msgs.reserve(n);
+@@ -648,9 +653,9 @@ void CameraHardwareInterface::releaseRecordingFrameBatch(const std::vector<sp<IM
+ 
+ status_t CameraHardwareInterface::autoFocus()
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+-        return CameraProviderManager::mapToStatusT(
++        return HidlProviderInfo::mapToStatusT(
+                 mHidlDevice->autoFocus());
+     }
+     return INVALID_OPERATION;
+@@ -658,9 +663,9 @@ status_t CameraHardwareInterface::autoFocus()
+ 
+ status_t CameraHardwareInterface::cancelAutoFocus()
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+-        return CameraProviderManager::mapToStatusT(
++        return HidlProviderInfo::mapToStatusT(
+                 mHidlDevice->cancelAutoFocus());
+     }
+     return INVALID_OPERATION;
+@@ -668,9 +673,9 @@ status_t CameraHardwareInterface::cancelAutoFocus()
+ 
+ status_t CameraHardwareInterface::takePicture()
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+-        return CameraProviderManager::mapToStatusT(
++        return HidlProviderInfo::mapToStatusT(
+                 mHidlDevice->takePicture());
+     }
+     return INVALID_OPERATION;
+@@ -678,9 +683,9 @@ status_t CameraHardwareInterface::takePicture()
+ 
+ status_t CameraHardwareInterface::cancelPicture()
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+-        return CameraProviderManager::mapToStatusT(
++        return HidlProviderInfo::mapToStatusT(
+                 mHidlDevice->cancelPicture());
+     }
+     return INVALID_OPERATION;
+@@ -688,17 +693,17 @@ status_t CameraHardwareInterface::cancelPicture()
+ 
+ status_t CameraHardwareInterface::setParameters(const CameraParameters &params)
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+-        return CameraProviderManager::mapToStatusT(
+-                mHidlDevice->setParameters(params.flatten().string()));
++        return HidlProviderInfo::mapToStatusT(
++                mHidlDevice->setParameters(params.flatten().c_str()));
+     }
+     return INVALID_OPERATION;
+ }
+ 
+ CameraParameters CameraHardwareInterface::getParameters() const
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     CameraParameters parms;
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         hardware::hidl_string outParam;
+@@ -714,9 +719,9 @@ CameraParameters CameraHardwareInterface::getParameters() const
+ 
+ status_t CameraHardwareInterface::sendCommand(int32_t cmd, int32_t arg1, int32_t arg2)
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+-        return CameraProviderManager::mapToStatusT(
++        return HidlProviderInfo::mapToStatusT(
+                 mHidlDevice->sendCommand((CommandType) cmd, arg1, arg2));
+     }
+     return INVALID_OPERATION;
+@@ -727,7 +732,7 @@ status_t CameraHardwareInterface::sendCommand(int32_t cmd, int32_t arg1, int32_t
+  * *not* done in the destructor.
+  */
+ void CameraHardwareInterface::release() {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         mHidlDevice->close();
+         mHidlDevice.clear();
+@@ -739,13 +744,13 @@ void CameraHardwareInterface::release() {
+  */
+ status_t CameraHardwareInterface::dump(int fd, const Vector<String16>& /*args*/) const
+ {
+-    ALOGV("%s(%s)", __FUNCTION__, mName.string());
++    ALOGV("%s(%s)", __FUNCTION__, mName.c_str());
+     if (CC_LIKELY(mHidlDevice != nullptr)) {
+         native_handle_t* handle = native_handle_create(1,0);
+         handle->data[0] = fd;
+         Status s = mHidlDevice->dumpState(handle);
+         native_handle_delete(handle);
+-        return CameraProviderManager::mapToStatusT(s);
++        return HidlProviderInfo::mapToStatusT(s);
+     }
+     return OK; // It's fine if the HAL doesn't implement dump()
+ }

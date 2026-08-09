@@ -288,7 +288,65 @@ mixPort deep_buffer            # primary output SUDAH deep buffer; di-revert di 
 
 Berbeda dari proyek 20: **kamera didahulukan**, karena ia satu-satunya risiko tak berbatas.
 
-### Status Fase 1 per 8 Agustus 2026 — TERSTAGING, belum terverifikasi
+### Fase 1 — SELESAI (9 Agustus 2026): `m libcameraservice` dan `m cameraserver` rc=0
+
+Kriteria selesai yang ditetapkan dokumen ini — "port `device1/` dari UL 20 →
+official 21; `m libcameraservice` rc=0" — **tercapai**, dan `m cameraserver`
+ikut tertaut penuh. Seri patch: `patches/frameworks_av/` (2 patch).
+
+Adaptasinya **ditulis untuk proyek ini, bukan disalin dari UL**. Android 14
+memecah `CameraProviderManager` jadi `HidlProviderInfo`/`AidlProviderInfo`,
+sehingga bentuk UL 20 tidak berlaku lagi:
+
+| Berkas | Yang ditambahkan |
+|---|---|
+| `common/CameraProviderManager.{h,cpp}` | `case 1:` di switch versi mayor HIDL; `openSession()` untuk `V1_0` |
+| `common/hidl/HidlProviderInfo.{h,cpp}` | `HidlDeviceInfo1` (turunan `DeviceInfo` langsung), `startDeviceInterface1()`, `initializeHidlDeviceInfo1()` |
+| `api1/CameraClient.{h,cpp}` | konstruktor + `initialize()` ke kontrak A14; `CameraServiceProxyWrapper` berbasis instance; **8 virtual murni** baru |
+| `CameraService.{h,cpp}` | `makeClient()` membuat `CameraClient` untuk HAL1; `friend class CameraClient` |
+
+Dua keputusan desain yang perlu diingat:
+
+- **`startDeviceInterface1()` metode terpisah, bukan template.** Rencana awal
+  menyebut "template ulang `startDeviceInterface`"; itu tidak bisa — di C++ dua
+  overload tak bisa dibedakan hanya oleh tipe kembalian, dan mentemplate versi
+  V3_2 memaksa definisinya pindah ke header padahal ia dipakai di banyak tempat.
+- **HAL1 + Camera API2 ditolak eksplisit.** Tanpa penolakan itu permintaan API2
+  ke perangkat HAL1 jatuh ke `CameraDeviceClient` yang mengasumsikan HAL3.
+
+Empat hal yang **hanya ketahuan dari compiler/linker** — dicatat karena akan
+dicari ulang kalau seri ini perlu di-rebase:
+
+1. `String8::string()` jadi privat di A14 → `c_str()` (29 tempat).
+2. `mapToStatusT` pindah ke `HidlProviderInfo`. Deklarasi lamanya di
+   `CameraProviderManager` **masih ada** tapi definisinya tidak, jadi
+   kesalahannya baru muncul saat **link**, bukan kompilasi.
+3. `CameraClient.h` wajib meng-include `device1/CameraHardwareInterface.h`.
+   Tanpa itu `HandleTimestampMessage` mengikat ke tipe HIDL bernama sama, dan
+   pesan errornya mencetak kedua sisi secara identik — menyesatkan.
+4. Konstanta ekstensi QCOM (`CAMERA_CMD_HISTOGRAM/METADATA/LONGSHOT`,
+   `CAMERA_MSG_STATS_DATA/META_DATA`) **tidak ada di `system/core` official**,
+   baik lineage-20.0 maupun 21.0 — hanya UL yang membawanya. Nilainya disalin
+   persis dari UL `lineage-21.0` karena angka-angka itu ABI ke blob kamera.
+   Didefinisikan lokal di `CameraClient.cpp`, bukan dengan menambal
+   `system/core`, agar seri patch tidak bertambah satu repo.
+
+⚠️ **Kompilasi bukan bukti kamera berfungsi.** Yang terbukti: framework A14 kini
+menerima, mendaftarkan, dan membuka perangkat HAL1. Apakah blob `camera.msm8916`
+A37 benar-benar bekerja di bawahnya baru terjawab di Fase 8 — dan itu risiko
+nomor satu di §7.
+
+Verifikasi yang dijalankan:
+
+```
+m libcameraservice   rc=0
+m cameraserver       rc=0
+llvm-nm libcameraservice.a  CameraHardwareInterface 143, HidlDeviceInfo1 44,
+                            CameraClient 153, startDeviceInterface1 9
+strings cameraserver        "Camera1 API (HAL1, legacy)", "CameraHardwareInterface"
+```
+
+### Catatan lama — status Fase 1 per 8 Agustus 2026 (TERSTAGING)
 
 Sudah dikerjakan:
 - Branch `lineage-21` dibuat di `rb_device_oppo_A37` (dari `15f7975`) dan
