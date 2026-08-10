@@ -16,13 +16,18 @@ Qualcomm MSM8916 (Snapdragon 410), kernel 3.10.108 arm64, 2 GB RAM, Adreno 306.
 > Preseden eksternal: retiredtab membangun LOS 21 untuk msm8974 (kernel 3.4) dengan
 > `repo init -u https://github.com/LineageOS-UL/android.git -b lineage-21.0`.
 >
-> **Yang tetap wajib meski basis UL** — diverifikasi, bukan diasumsikan:
-> Camera HAL1 `device1/` (tidak ada di UL 21), `zip -y` di `non_ab_ota.py`,
-> `PRODUCT_COMPRESSED_APEX := false`, dan `String8::string()` di qcom-caf. Tiga dari empat
-> ada di `build/make` — satu-satunya dari repo itu yang **tidak** di-fork UL.
+> **Fase 0 selesai.** Tree UL ter-sync bersih pada percobaan pertama: 1453 project,
+> 0 HEAD kosong, 174 GB. Local manifest menyusut dari delapan project jadi **tiga** (device
+> tree, kernel, vendor) — UL menyediakan sisanya lewat `snippets/losul.xml`.
 >
-> `hardware/qcom-caf/msm8916` dan `device/qcom/sepolicy-legacy` **sudah disediakan UL** lewat
-> `snippets/losul.xml`, sehingga local manifest menyusut dari delapan project jadi tiga.
+> **Yang tetap wajib meski basis UL** — diverifikasi ke tree, bukan diasumsikan:
+> Camera HAL1 `device1/`, `zip -y` di `non_ab_ota.py`, dan `String8::string()` di qcom-caf.
+>
+> Enam asumsi lain ternyata **sudah beres di basis**, termasuk dua yang percobaan pertama
+> harus tambal sendiri dari device tree: `QCOM_BOARD_PLATFORMS += msm8916`
+> (`qcom_boards.mk:22`) dan `PRODUCT_COMPRESSED_APEX := false` (`updatable_apex.mk:26`).
+> Yang terakhir berarti ROM berikutnya tidak lagi mengirim 20 berkas `.capex` untuk
+> didekompresi apexd saat boot.
 >
 > **Yang tidak hilang dari percobaan pertama:** seluruh temuan device tree, VINTF, sepolicy,
 > kamera, dan batas mesin build — dibawa utuh ke §4 `PLAN.md`.

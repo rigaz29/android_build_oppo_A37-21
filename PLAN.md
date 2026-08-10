@@ -48,7 +48,7 @@ Ini **pembenaran langsung** untuk pivot basis, dan bukan dari saya:
 msm8974 memakai **kernel 3.4** — lebih tua dari kita — dan retiredtab mengirim build LOS 21
 untuknya. Jadi "Android 14 di QCOM legacy dengan basis UL" bukan hipotesis.
 
-Yang ikut dipelajari dari resep itu, dan **belum pernah kita terapkan**:
+Resep itu juga yang menyingkap perbedaan yang percobaan pertama tidak pernah sadari:
 
 ```
 21/UL-patches-2024/build-aug-2024.patch
@@ -57,8 +57,9 @@ Yang ikut dipelajari dari resep itu, dan **belum pernah kita terapkan**:
   +PRODUCT_COMPRESSED_APEX := false
 ```
 
-Build kita saat ini mengirim **20 berkas `.capex`** (`ls out/…/system/apex/*.capex`).
-Semuanya harus didekompresi apexd saat boot. Lihat §4.8.
+ROM percobaan pertama mengirim **20 berkas `.capex`** yang harus didekompresi apexd ke
+`/data` saat boot pada perangkat 2 GB. Basis UL sudah membawa commit itu, jadi ini bukan
+pekerjaan kita — tapi tetap salah satu variabel yang berubah. Lihat §4.8.
 
 ### 1.2 Jangkar B — acroreiser: msm8916 + kernel 3.10 menjalankan Android 14
 
@@ -125,20 +126,38 @@ losul.xml   hardware/qcom-caf/msm8916/display    lineage-21.0-caf-msm8916
 losul.xml   hardware/qcom-caf/msm8916/media      lineage-21.0-caf-msm8916
 ```
 
-⚠️ **Koreksi terhadap draf pertama dokumen ini.** Draf itu menyatakan UL tidak menyediakan
-msm8916, berdasarkan `grep msm8916 snippets/lineage.xml` yang memang menghasilkan nol.
-Kesimpulannya salah karena `losul.xml` tidak pernah ikut diperiksa. Akibatnya nyata:
-local manifest menyusut dari delapan project jadi **tiga** (device tree, kernel, vendor).
-Aturan yang lahir dari kekeliruan ini: sebelum menambah project ke local manifest,
-grep **seluruh** `.repo/manifests/*.xml` dan `snippets/*.xml`, bukan satu berkas.
-
-61 repo yang UL fork mencakup semua yang percobaan pertama tambal tangan — `frameworks/av`,
-`frameworks/base`, `frameworks/native`, `packages/modules/adb`, `system/core`,
-`system/sepolicy`, `system/bpf`, `hardware/qcom-caf/common`, `hardware/ril`,
+61 repo di `losul.xml` mencakup hampir semua yang percobaan pertama tambal tangan —
+`frameworks/av`, `frameworks/base`, `frameworks/native`, `packages/modules/adb`,
+`system/core`, `system/sepolicy`, `system/bpf`, `hardware/qcom-caf/common`, `hardware/ril`,
 `frameworks/opt/telephony`, `bionic`, `art`.
 
-**`build/make` TIDAK termasuk.** Itu menjelaskan kenapa retiredtab harus mengirim
-`build-aug-2024.patch` terpisah, dan kenapa dua butir di §2 tetap jadi pekerjaan kita.
+⚠️ **Dua koreksi terhadap draf pertama dokumen ini, dari kesalahan yang sama diulang dua
+kali.**
+
+Draf pertama menyatakan UL tidak menyediakan msm8916, dari `grep msm8916
+snippets/lineage.xml` yang memang nol — `losul.xml` tidak ikut diperiksa. Setelah itu
+diperbaiki, draf berikutnya menyatakan `build/make` bukan fork UL, karena `losul.xml` tidak
+memuatnya. Itu pun salah:
+
+```
+.repo/manifests/default.xml:32
+  <project path="build/make" name="LineageOS-UL/android_build" …/>
+```
+
+UL mem-fork `build/make` lewat **override di `default.xml`**, bukan lewat snippet.
+
+**Aturan yang lahir dari dua kekeliruan ini — dan yang benar-benar menutup celahnya:**
+jangan pernah menyimpulkan dari berkas manifest sumber. Baca hasil **resolve**-nya:
+
+```bash
+repo manifest | grep 'path="build/make"'      # jawaban yang mengikat
+```
+
+Menggrep berkas sumber gagal dua arah sekaligus: snippet bisa menambah, dan `default.xml`
+bisa meng-override. Hanya manifest hasil resolve yang tahu keduanya.
+
+Akibat nyata dari koreksi ini: local manifest menyusut dari delapan project jadi **tiga**,
+dan dua butir yang §2 daftarkan sebagai pekerjaan kita ternyata sudah beres di basis.
 
 ### 1.5 Jangkar E — percobaan pertama (basis official), dan apa yang ia buktikan
 
@@ -187,15 +206,23 @@ demi ini.
 | adbd FunctionFS legacy | ✅ ada | `daemon/usb_legacy.cpp` ada di UL |
 | eBPF non-fatal, memfd gate | ✅ ada | seri T0 menyatu di basis |
 | **Camera HAL1 `device1/`** | ❌ **tidak ada** | API GitHub: `device1` TIDAK ADA di UL 21 |
-| **`zip -y` saat kemas OTA** | ❌ **tidak ada** | `non_ab_ota.py:608` UL masih `["zip", tmpfile, "-r", ".", "-0"]` |
-| **`PRODUCT_COMPRESSED_APEX`** | ❌ masih `true` | `build/make` bukan fork UL (§1.4) |
-| `hardware/qcom-caf/msm8916` | ✅ **ada** | `snippets/losul.xml` — lihat koreksi §1.4 |
-| `device/qcom/sepolicy-legacy` | ✅ **ada** | `snippets/losul.xml` |
-| `String8::string()` di qcom-caf msm8916 | ❌ masih dipakai | audio 11 titik, display 4 titik |
+| **`zip -y` saat kemas OTA** | ❌ **tidak ada** | `build/make/tools/releasetools/non_ab_ota.py:608` masih `["zip", tmpfile, "-r", ".", "-0"]` |
+| **`String8::string()` di qcom-caf msm8916** | ❌ masih dipakai | audio 1 berkas, display 3 berkas |
+| `PRODUCT_COMPRESSED_APEX` | ✅ **sudah `false`** | `updatable_apex.mk:26`, commit `1d10d6898b` — persis commit yang retiredtab kirim sebagai patch |
+| `QCOM_BOARD_PLATFORMS += msm8916` | ✅ **sudah ada** | `hardware/qcom-caf/common/qcom_boards.mk:22` |
+| `hardware/qcom-caf/msm8916` | ✅ ada | `snippets/losul.xml` |
+| `device/qcom/sepolicy-legacy` | ✅ ada | `snippets/losul.xml`, lengkap dengan direktori `msm8916/` |
+| RenderEngine GLES | ✅ ada | `frameworks/native/libs/renderengine/gl/` |
+| adbd FunctionFS legacy | ✅ ada | `packages/modules/adb/daemon/usb_legacy.cpp` |
+| `sysfs_disk_stat` dideklarasikan platform | ✅ ada | `system/sepolicy/public/file.te:22` |
 
-Empat baris ❌ itulah pekerjaan sesungguhnya rencana ini. Perhatikan polanya: tiga dari
-empat ada di `build/make` atau `frameworks/av` — dua repo yang UL **tidak** fork atau fork
-tanpa membawa HAL1.
+Tinggal **tiga** baris ❌ — turun dari empat di draf pertama — dan seluruhnya diverifikasi
+di tree yang sudah ter-sync, bukan lewat API GitHub.
+
+Dua yang berpindah dari ❌ ke ✅ layak dicatat, karena keduanya sekaligus **perbedaan nyata
+antara percobaan pertama dan sekarang**: ROM percobaan pertama mengirim 20 `.capex` dan
+device tree-nya memaksa `QCOM_BOARD_PLATFORMS`. Di basis ini keduanya sudah benar tanpa kita
+sentuh.
 
 ---
 
@@ -259,12 +286,20 @@ namespace yang sama** dengan blob.
 
 `libril_shim` **jangan disentuh** — lolos apa adanya, dan RIL subsistem yang terbukti.
 
-### 4.2 `QCOM_BOARD_PLATFORMS += msm8916`
+### 4.2 `QCOM_BOARD_PLATFORMS += msm8916` — TIDAK diperlukan lagi
 
-msm8916 dicabut dari `hardware/qcom-caf/common/qcom_boards.mk`, sehingga gerbang
-`is-board-platform-in-list` di `media/Android.mk:5` false dan `mm-core/` +
-`libstagefrighthw/` tidak pernah di-include. Radius diukur: variabel itu dipakai di **satu**
-titik gerbang di seluruh repo yang dibangun. Efek samping positif: `libbt-vendor` ikut pulih.
+Di basis official, msm8916 dicabut dari `hardware/qcom-caf/common/qcom_boards.mk`, sehingga
+gerbang `is-board-platform-in-list` di `media/Android.mk:5` false dan `mm-core/` +
+`libstagefrighthw/` tak pernah di-include. Percobaan pertama menambalnya dari device tree.
+
+**Di basis UL sudah ada:**
+
+```
+hardware/qcom-caf/common/qcom_boards.mk:22   QCOM_BOARD_PLATFORMS += msm8916
+```
+
+Jangan bawa tambalan device tree-nya. Efek samping yang dulu jadi bonus (`libbt-vendor`
+ikut pulih) datang sendiri.
 
 ### 4.3 Empat modul yang hulu cabut di A14
 
@@ -319,13 +354,21 @@ menaikkannya ke 5 belum pernah diuji — dan ini salah satu tersangka yang belum
   `system/sepolicy` sendiri; hanya **satu** benar-benar dari device tree kita
   (`app_domain(timekeep_app)`).
 
-### 4.8 BARU — `PRODUCT_COMPRESSED_APEX := false`
+### 4.8 `PRODUCT_COMPRESSED_APEX := false` — sudah beres di basis
 
-Dari resep retiredtab (§1.1), belum pernah diterapkan. Build kita mengirim **20 `.capex`**
-yang harus didekompresi apexd ke `/data` saat boot. Pada 2 GB RAM + eMMC lambat ini beban
-nyata, dan retiredtab mematikannya untuk perangkat legacy.
+Ditemukan lewat resep retiredtab (§1.1) dan sempat dicatat sebagai pekerjaan kita. Ternyata
+UL sudah membawanya, lewat **commit yang sama persis** dengan yang retiredtab kirim sebagai
+patch lepas:
 
-**Status: kandidat penyebab boot stuck yang BELUM diuji.** Naikkan ke Fase 1.
+```
+build/make/target/product/updatable_apex.mk:26   PRODUCT_COMPRESSED_APEX := false
+commit 1d10d6898b  "Set PRODUCT_COMPRESSED_APEX := false"
+```
+
+Nilainya tetap besar sebagai **variabel yang berubah**: ROM percobaan pertama mengirim 20
+berkas `.capex` yang harus didekompresi apexd ke `/data` saat boot pada perangkat 2 GB;
+build di basis ini tidak. Kalau ROM berikutnya boot, ini salah satu dari sedikit perbedaan
+yang bisa menjelaskannya — jadi catat hasilnya, jangan cuma nikmati.
 
 ### 4.9 adb untuk bring-up
 
@@ -381,7 +424,12 @@ yang dikerjakan sebelum ada homescreen.
       di-push. Sengaja BUKAN melanjutkan `lineage-21` (§3.1).
 - [x] **Local manifest** — **tiga** project saja (device tree, kernel, vendor), turun dari
       delapan. Resolve bersih: 1453 project, nol path ganda. Lihat koreksi §1.4.
-- [ ] **`repo sync`** — berjalan (`tools/sync-ul.sh`, retry sampai 8×, log `$TREE/sync.log`)
+- [x] **`repo sync`** — **bersih pada percobaan pertama**, 25 menit, 174 GB.
+      1453 project, **0 HEAD kosong**. (`tools/sync-ul.sh`)
+- [x] **Asumsi §4 diverifikasi ke tree, bukan ke API GitHub.** Enam dari sembilan ternyata
+      sudah beres di basis; tiga tersisa jadi pekerjaan Fase 1–2 (tabel §2). Dua asumsi
+      yang gugur — `QCOM_BOARD_PLATFORMS` (§4.2) dan `PRODUCT_COMPRESSED_APEX` (§4.8) —
+      menghemat perubahan device tree yang percobaan pertama harus buat sendiri.
 - [ ] **Uji hipotesis yang tertinggal dari percobaan 1, sebelum apa pun dibangun:**
       `PRODUCT_COMPRESSED_APEX := false` (§4.8), dan `boot-panic5.img` untuk memisahkan
       panic vs hang
