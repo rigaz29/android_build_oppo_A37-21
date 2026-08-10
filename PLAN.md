@@ -443,14 +443,62 @@ yang dikerjakan sebelum ada homescreen.
 **Kriteria selesai:** penyebab stuck-di-logo teridentifikasi, atau tiga hipotesis di atas
 tergugur dengan bukti.
 
-### Fase 1 — Device tree: bawa yang terbukti, buang yang lahir dari basis official
-- [ ] §4.1 shim · §4.2 `QCOM_BOARD_PLATFORMS` · §4.3 empat modul · §4.4 header ·
-      §4.5 String8 · §4.8 compressed apex · §4.9 adb bring-up
-- [ ] **Jangan** bawa: workaround `BOARD_SEPOLICY_M4DEFS` (§4.7), deklarasi `sysfs_disk_stat`
-      (§4.7) — keduanya gugur dengan basis UL
-- [ ] Buang salinan `prebuilts/vndk/v28` (snapshot dicabut; nol pemakai di tiga sumbu)
+### Fase 1 — Device tree ✅ SELESAI
 
-**Kriteria selesai:** `m nothing` rc=0.
+**Kriteria selesai tercapai:** `m nothing` rc=0 (14:50 penuh, lalu 02:14 inkremental),
+nol modul hilang, nol pelanggaran link-type, nol peringatan deprecated dari device tree.
+Branch `lineage-21-ul` @ `a917725`.
+
+- [x] §4.1 shim · §4.4 header (10 titik / 8 berkas) · §4.5 String8 (5 titik) ·
+      §4.9 adb bring-up · buang salinan VNDK v28
+- [x] §4.3 menyusut dari **empat modul jadi dua**: clearkey → AIDL, dan Trust HAL dibuang.
+      Wi-Fi HIDL dan in-process tethering **tidak jadi diubah** — lihat di bawah.
+- [x] **Tidak** dibawa: `BOARD_SEPOLICY_M4DEFS`, deklarasi `sysfs_disk_stat`,
+      `QCOM_BOARD_PLATFORMS += msm8916` — ketiganya gugur di basis UL
+- [x] `TARGET_USES_64_BIT_BINDER` dibuang (deprecated, tanpa efek)
+
+**Dua asumsi §4.3 yang gugur saat diverifikasi ke tree.** Percobaan pertama memigrasikan
+Wi-Fi ke AIDL dan membuang pasangan in-process tethering, karena official mencabut keduanya.
+UL memulihkannya:
+
+```
+android.hardware.wifi@1.0-service      hardware/interfaces/wifi/1.6/default/Android.bp
+InProcessNetworkStack                  packages/modules/NetworkStack/Android.bp
+com.android.tethering.inprocess         packages/modules/Connectivity/Tethering/apex/Android.bp
+```
+
+Keduanya dibiarkan apa adanya. Ini menghemat perubahan **dan** menurunkan risiko: percobaan
+pertama menyentuh dua subsistem yang di basis ini tidak perlu disentuh sama sekali.
+
+#### 1.a Pemblokir baru yang tidak ada di percobaan pertama — `hardware/qcom/wlan`
+
+```
+error: dependency "libwifi-hal-qcom" of "libwifi-hal" missing variant:
+         os:android,image:vendor,arch:arm_armv8-a_cortex-a53,sdk:,link:static
+       available variants:
+         <kosong>
+```
+
+"Available variants kosong" adalah petunjuknya — modulnya bukan salah varian, ia tidak punya
+varian sama sekali. Konfigurasi sudah benar (`board_wlan_device: 'qcwcn'` ada di
+`soong.lineage_A37.variables`), jadi akarnya tabrakan nama:
+
+```
+hardware/qcom/wlan/Android.bp:55            wifihal_qcom_defaults { name: "libwifi-hal-qcom" }
+frameworks/opt/net/wifi/…/Android.bp:333    wifi_cc_prebuilt_library_static { name: "libwifi-hal-qcom" }
+```
+
+Keduanya tanpa `soong_namespace`. Modul `defaults` tidak punya varian build, sehingga
+dependensi `libwifi-hal` jatuh ke sana. Diverifikasi dengan menyingkirkan `Android.bp`-nya
+sementara: error hilang.
+
+`hardware/qcom/wlan` melayani chip wcn6740/wcn3990; A37 memakai qcwcn, dan HAL kita dibangun
+dari repo lain (`wifi_makefile_goal` mengambil hasil
+`hardware/qcom-caf/wlan/qcwcn/wifi_hal/Android.mk`). Dibuang lewat `<remove-project>` di
+`A37-21.xml`.
+
+Pemblokir ini tidak muncul di percobaan pertama karena susunan repo WLAN di manifest official
+berbeda — contoh konkret bahwa pindah basis memindahkan masalah, bukan hanya menghapusnya.
 
 ### Fase 2 — Patch yang tetap wajib meski basis UL
 - [ ] `frameworks/av`: seri kamera HAL1 (2 patch — salin berkas + adaptasi A14). Sudah ada

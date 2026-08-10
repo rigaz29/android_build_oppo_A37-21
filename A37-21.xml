@@ -32,6 +32,33 @@
 
   <remote name="gh" fetch="https://github.com/" />
 
+  <!-- ================================================================
+       hardware/qcom/wlan DIBUANG — menabrak nama modul
+       ================================================================
+       Repo ini melayani chip WLAN baru (wcn6740, wcn3990). A37 memakai qcwcn.
+       Masalahnya bukan sekadar tak terpakai: ia mendefinisikan nama modul yang
+       SAMA dengan library asli, tanpa soong_namespace —
+
+         hardware/qcom/wlan/Android.bp:55
+             wifihal_qcom_defaults { name: "libwifi-hal-qcom", ... }
+         frameworks/opt/net/wifi/libwifi_hal/Android.bp:333
+             wifi_cc_prebuilt_library_static { name: "libwifi-hal-qcom", ... }
+
+       Modul `defaults` tidak punya varian build, sehingga dependensi
+       libwifi-hal jatuh ke sana dan soong menolak:
+
+         dependency "libwifi-hal-qcom" of "libwifi-hal" missing variant:
+           os:android,image:vendor,arch:arm_armv8-a_cortex-a53,sdk:,link:static
+         available variants:
+           <kosong>
+
+       Diverifikasi dengan menyingkirkan Android.bp-nya sementara: error itu
+       hilang. Dan HAL qcwcn kita memang dibangun dari repo lain —
+       frameworks/.../Android.bp:349 `wifi_makefile_goal make-libwifi-hal-qcom`
+       mengambil hasil build hardware/qcom-caf/wlan/qcwcn/wifi_hal/Android.mk.
+       Jadi membuangnya tidak menghilangkan apa pun yang kita pakai. -->
+  <remove-project name="LineageOS/android_hardware_qcom_wlan" />
+
   <!-- Device tree. Basis: lineage-20 @ 15f7975 — tree yang ROM-nya TERPASANG dan masih
        DIPAKAI di perangkat per 10 Agustus 2026 (boot, Wi-Fi, Bluetooth, RIL berfungsi).
 
