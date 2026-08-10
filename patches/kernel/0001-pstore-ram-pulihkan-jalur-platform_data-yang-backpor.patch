@@ -1,0 +1,61 @@
+From 6fa5298755d89dc1f14f08f7d7f26f02ca003084 Mon Sep 17 00:00:00 2001
+From: rigaz29 <ryanbagas27@gmail.com>
+Date: Mon, 10 Aug 2026 17:25:19 +0000
+Subject: [PATCH] pstore/ram: pulihkan jalur platform_data yang backport DT
+ menghapusnya
+
+ramoops tidak pernah berfungsi di kernel ini. ramoops_probe() mengalokasikan
+pdata baru yang seluruhnya nol lalu HANYA mengisinya dari device tree:
+
+  pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
+  if (pdev->dev.of_node)
+          ramoops_of_init(pdev);
+  if (!pdata->mem_size || ...) {
+          pr_err("The memory size and the record/console size must be non-zero");
+          goto fail_out;
+  }
+
+Upstream memakai pdata = pdev->dev.platform_data, yaitu struct yang dikirim
+ramoops_register_dummy() dari parameter modul di cmdline (ramoops.mem_address,
+ramoops.mem_size, dan seterusnya). Backport dukungan device tree di kernel ini
+menghapus jalur itu, dan tidak ada node ramoops di DTS mana pun -- sehingga
+pdata->mem_size selalu nol dan probe selalu gagal.
+
+Akibatnya pstore tidak pernah punya backend. Terbukti di perangkat nyata yang
+menjalankan LOS 20 dengan parameter ramoops lengkap di cmdline:
+
+  incidentd: GZipSection failed to open file /sys/fs/pstore/console-ramoops
+  incidentd: GZipSection failed to open file /sys/fs/pstore/console-ramoops-0
+
+Perbaikan ini hanya aktif ketika of_node NULL, jadi jalur device tree tidak
+tersentuh sama sekali. Dipilih ketimbang menambah node DT supaya dt.img tetap
+byte-identik dengan LOS 20 yang boot -- kegagalan boot LOS 21 belum terpecahkan
+dan dt.img salah satu dari sedikit komponen yang masih identik, jadi tidak boleh
+jadi variabel baru.
+
+dev_get_platdata() tersedia di include/linux/device.h:904, dan memcpy lewat
+linux/kernel.h; keduanya sudah ikut lewat include yang ada.
+
+Verifikasi kompilasi lewat m bootimage sedang berjalan saat commit ini dibuat.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ fs/pstore/ram.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/pstore/ram.c b/fs/pstore/ram.c
+index 4d9febc743c..c6db6e7aeb5 100644
+--- a/fs/pstore/ram.c
++++ b/fs/pstore/ram.c
+@@ -513,6 +513,8 @@ static int ramoops_probe(struct platform_device *pdev)
+ 
+ 	if (pdev->dev.of_node)
+ 		ramoops_of_init(pdev);
++	else if (dev_get_platdata(dev))
++		memcpy(pdata, dev_get_platdata(dev), sizeof(*pdata));
+ 
+ 	/* Only a single ramoops area allowed at a time, so fail extra
+ 	 * probes.
+-- 
+2.43.0
+

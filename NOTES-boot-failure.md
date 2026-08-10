@@ -109,19 +109,81 @@ flash boot-panic5.img  →  REBOOT BERULANG  = kernel panic, penyebab di kernel
                                              macetnya di init atau setelahnya
 ```
 
-## Yang akan menghentikan tebak-tebakan
+## ⚠️ ramoops TIDAK PERNAH BERFUNGSI — dan sekarang sudah diperbaiki
 
-`ramoops` aktif di cmdline (`ramoops.mem_address=0x9ff00000`). Recovery masih
-LOS 20 dan tidak tersentuh flash mana pun, jadi masih bisa dimasuki:
+Ditemukan 10 Agustus 2026. Ini membatalkan saran diagnosis yang diulang beberapa
+kali di dokumen ini: membaca `console-ramoops` tidak akan pernah menghasilkan
+apa pun, karena berkasnya tidak ada.
+
+**Bukti dari perangkat nyata** yang menjalankan LOS 20 dengan `ramoops.*` lengkap
+di cmdline (`report/bugreport.zip`):
 
 ```
-adb shell "cat /sys/fs/pstore/console-ramoops" > lastboot.txt
-adb shell "cat /proc/last_kmsg" > lastkmsg.txt
+incidentd: GZipSection failed to open file /sys/fs/pstore/console-ramoops
+incidentd: GZipSection failed to open file /sys/fs/pstore/console-ramoops-0
+incidentd: [gzip …] can't open all the files
 ```
 
-Kalau kernel sempat jalan sedetik pun, jejaknya di situ. Kalau adb di RECOVERY
-juga tidak terdeteksi, itu temuan besar tersendiri — berarti masalahnya di sisi
-USB/PC, bukan di ROM.
+**Akarnya** di `fs/pstore/ram.c` kernel ini. Konfigurasinya sudah benar
+(`PSTORE=y`, `PSTORE_RAM=y`, `PSTORE_CONSOLE=y`, `PSTORE_PMSG=y`), tapi:
+
+```c
+pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);   /* pdata baru, semua nol */
+if (pdev->dev.of_node)
+        ramoops_of_init(pdev);                           /* HANYA dari device tree */
+if (!pdata->mem_size || …) {
+        pr_err("The memory size and the record/console size must be non-zero");
+        goto fail_out;
+}
+```
+
+Upstream memakai `pdata = pdev->dev.platform_data` — struct yang dikirim
+`ramoops_register_dummy()` dari parameter modul di cmdline. Backport dukungan DT
+di kernel ini menghapus jalur itu, dan **tidak ada node `ramoops` di DTS mana
+pun**. Jadi `pdata->mem_size` selalu nol dan probe selalu gagal.
+
+**Perbaikan:** `patches/kernel/0001-pstore-ram-*.patch` (kernel commit
+`6fa5298755d`) memulihkan jalur `platform_data`, aktif hanya bila `of_node` NULL
+sehingga jalur DT tidak tersentuh. Sengaja BUKAN lewat node DT, supaya `dt.img`
+tetap byte-identik dengan LOS 20 yang boot.
+
+Ditambah ke cmdline — default `console_size`/`pmsg_size` cuma 4096:
+
+```
+ramoops.console_size=0x100000   1 MB   -> console-ramoops
+ramoops.pmsg_size=0x40000     256 KB   -> pmsg-ramoops-0 (logcat terakhir)
+ramoops.dump_oops=1
+```
+
+## Yang membatasi diagnosis — dan penggantinya
+
+`ramoops` hanya bertahan pada reboot **hangat**. Cabut baterai = RAM hilang =
+nol jejak. Jadi kegagalan boot yang berakhir dengan pencabutan baterai tidak
+pernah bisa didiagnosis, dan itulah yang selama ini terjadi.
+
+Karena itu **pengaman boot** ditambahkan (`rootdir/etc/bootwatchdog.sh`, device
+tree commit `b871bcc`): kalau `sys.boot_completed` tidak muncul dalam 300 detik,
+jejak disimpan ke `/data/bootfail` lalu perangkat reboot ke recovery. `/data`
+tidak terenkripsi, jadi berkasnya terbaca dari recovery:
+
+```
+adb shell ls -l /data/bootfail
+adb pull /data/bootfail
+```
+
+Empat kelas kegagalan dan penanganannya sekarang:
+
+| Kelas | Penanganan | Status |
+|---|---|---|
+| kernel panic | `CONFIG_PANIC_TIMEOUT=5`, tidak ditimpa (`kernel/panic.c:45`) | sudah ada |
+| CPU hang | `CONFIG_MSM_WATCHDOG_V2=y` | sudah ada |
+| init FATAL | `androidboot.init_fatal_reboot_target=recovery` | sudah ada |
+| **userspace menggantung** | `bootwatchdog.sh` | **BARU** |
+
+⚠️ Konsekuensi penting dari tabel itu: karena panic **sudah** auto-reboot dan CPU
+hang **sudah** memicu watchdog bite, kenyataan bahwa perangkat diam tanpa reboot
+sudah membuktikan **tidak ada panic dan tidak ada CPU hang**. `boot-panic5.img`
+dengan demikian redundan — `panic=5` hanya menyetel nilai yang sudah 5.
 
 ## Jalan pulang
 
