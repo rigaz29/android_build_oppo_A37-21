@@ -527,9 +527,31 @@ terbangun — jalur HAL1 utuh.
 - Peringatan `-Wformat` lama di `CameraProviderManager.cpp` (base UL) tetap ada — bukan
   regresi patch kita, dan hanya warning.
 
-### Fase 3 — VINTF & SEPolicy
-- [ ] §4.6 `target-level` + `framework_compatibility_matrix.xml`
-- [ ] Ukur ulang neverallow; `SELINUX_IGNORE_NEVERALLOWS` tetap
+### Fase 3 — VINTF & SEPolicy ✅ SELESAI
+
+**Kriteria selesai tercapai:** `m check-vintf-all sepolicy_freeze_test selinux_policy -j6` rc=0
+(16:55, build 20260810). Device tree `lineage-21-ul` naik ke `…` (lihat commit).
+
+- [x] `manifest.xml`: `target-level="legacy"` → `target-level="5"`. Error asli checkvintf
+      menuntut 10 instance device HAL yang tidak ada di matrix framework mana pun →
+      didaftarkan sebagai `optional` di **`framework_compatibility_matrix.xml`** (berkas
+      baru) dan disambungkan lewat `DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE` di
+      BoardConfig.mk. 10 instance itu: cameraservice.service@2.1, configstore@1.1,
+      light@2.0, power@1.0, radio.deprecated@1.0 (slot1+slot2), vibrator@1.0,
+      vendor.lineage.health (AIDL), livedisplay@2.0, vendor.qti.hardware.perf@1.0.
+      `vendor/lineage/config/device_framework_matrix.xml` yang memuat sebagian darinya
+      TIDAK dipakai build ini — tidak ada yang mereferensikannya.
+- [x] **Ukur ulang neverallow** — 3.298 pelanggaran (`m sepolicy_neverallows` dengan flag
+      dimatikan; perintah `m … SELINUX_IGNORE_NEVERALLOWS=` TIDAK diteruskan ke Soong,
+      pengukuran memakai edit sementara pada kedua sumber flag):
+      - `system/sepolicy` sendiri: ~3.216 (property.te 2.232, domain.te 828, dst.)
+      - `device/oppo/A37` (kita): **16** — adbd.te **15** + timekeep_app.te 1
+        (naik dari 1 di percobaan pertama karena seri adb bring-up Fase 1)
+      - `device/qcom/sepolicy-legacy`: 59 · `device/lineage/sepolicy`: 7
+      → `SELINUX_IGNORE_NEVERALLOWS := true` **tetap**, dan komentar di BoardConfig.mk
+      diperbarui dengan angka baru
+- [x] `sepolicy_freeze_test` lolos — konsisten dengan §4.7 (seri UL sudah menyatu,
+      `sysfs_disk_stat` deklarasi platform, nol kerja dari kita)
 
 **Kriteria selesai:** `m check-vintf-all sepolicy_freeze_test selinux_policy` rc=0.
 
