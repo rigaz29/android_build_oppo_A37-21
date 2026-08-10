@@ -446,8 +446,11 @@ tergugur dengan bukti.
 ### Fase 1 — Device tree ✅ SELESAI
 
 **Kriteria selesai tercapai:** `m nothing` rc=0 (14:50 penuh, lalu 02:14 inkremental),
-nol modul hilang, nol pelanggaran link-type, nol peringatan deprecated dari device tree.
-Branch `lineage-21-ul` @ `a917725`.
+nol modul hilang, nol pelanggaran link-type. Branch `lineage-21-ul` @ `a917725`.
+
+Tersisa **tiga** peringatan `LOCAL_COPY_HEADERS is deprecated` dari `gps/` (`libloc_core`,
+`libloc_eng`, `libgps.utils`). Sengaja dibiarkan: deprecated tapi masih berfungsi, dan
+mengubahnya berarti menyentuh subsistem yang tidak sedang bermasalah.
 
 - [x] §4.1 shim · §4.4 header (10 titik / 8 berkas) · §4.5 String8 (5 titik) ·
       §4.9 adb bring-up · buang salinan VNDK v28
