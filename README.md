@@ -3,34 +3,26 @@
 Rencana porting **LineageOS 21 (Android 14, SDK 34)** untuk **OPPO A37 / A37f / A37fw** —
 Qualcomm MSM8916 (Snapdragon 410), kernel 3.10.108 arm64, 2 GB RAM, Adreno 306.
 
-> ## Status: **Fase 1–7 selesai — ROM SUDAH JADI**
+> ## Status: **memulai ulang dengan basis LineageOS-UL** (10 Agustus 2026)
 >
-> Tree LineageOS 21 official sudah tersedia dan terverifikasi: **1430 project, 0 HEAD kosong,
-> 169 GB**, manifest `2ea6537` melacak **ASB 2026-06**.
+> Percobaan pertama memakai LineageOS **official** sebagai basis. ROM-nya jadi dan lolos
+> seluruh gerbang build — tapi **tidak pernah boot**: berhenti di logo OPPO tanpa satu pun
+> entri USB. Rencana kerja baru ada di **[`PLAN.md`](PLAN.md)**; percobaan pertama diarsipkan
+> lengkap di [`PLAN-ATTEMPT-OFFICIAL.md`](PLAN-ATTEMPT-OFFICIAL.md).
 >
-> Dengan `lunch lineage_A37-ap2a-userdebug`:
+> **Apa yang berubah:** basis pindah ke `LineageOS-UL/android` `lineage-21.0`, sehingga 96
+> patch legacy yang sebelumnya di-port tangan lewat 17 repo **sudah menyatu di basis**.
+> Alasan lengkap dan ongkosnya (UL beku di **ASB 2025-03**) ada di §2 `PLAN.md`.
+> Preseden eksternal: retiredtab membangun LOS 21 untuk msm8974 (kernel 3.4) dengan
+> `repo init -u https://github.com/LineageOS-UL/android.git -b lineage-21.0`.
 >
-> ```
-> m nothing            rc=0   nol pelanggaran link-type, nol modul hilang
-> m libcameraservice   rc=0   jalur kamera HAL1 tersambung penuh
-> m cameraserver       rc=0
-> m librenderengine surfaceflinger   rc=0   backend GLES kembali dikenali
-> m sepolicy_freeze_test selinux_policy rc=0
-> m check-vintf-all                      rc=0   COMPATIBLE
-> ```
+> **Yang tetap wajib meski basis UL** — diverifikasi, bukan diasumsikan:
+> Camera HAL1 `device1/` (tidak ada di UL 21), `zip -y` di `non_ab_ota.py` (belum ada di UL),
+> `hardware/qcom-caf/msm8916` (nol kemunculan di manifest UL), dan `String8::string()` di
+> qcom-caf.
 >
-> ```
-> lineage-21.0-20260809_133142-UNOFFICIAL-A37.zip   695 MB  (+96 patch UL)
-> tools/verify-rom.sh   SEMUA VERIFIKASI LOLOS
-> ```
->
-> Vendor blobs: **320 dipertahankan, nol perubahan**. 162 dependensi `DT_NEEDED` diukur;
-> 5 tak tersedia — dan kelimanya juga tidak ada di ROM 20 yang berjalan, jadi nol regresi.
->
-> Rinciannya di [`PLAN.md`](PLAN.md), satu bagian per fase.
->
-> ⚠️ ROM sebelumnya gagal boot (masuk fastboot setelah splash); ROM ini belum diuji. Semua di atas bukti build dan verifikasi statis.
-> Kamera, tethering, Wi-Fi AIDL, dan clearkey baru terbukti di Fase 8.
+> **Yang tidak hilang dari percobaan pertama:** seluruh temuan device tree, VINTF, sepolicy,
+> kamera, dan batas mesin build — dibawa utuh ke §4 `PLAN.md`.
 >
 > Pendahulunya: [`android_build_oppo_A37-20`](https://github.com/rigaz29/android_build_oppo_A37-20)
 > — LineageOS 20, **ROM terpasang dan dipakai di perangkat**: boot, Wi-Fi, Bluetooth, dan
@@ -103,7 +95,8 @@ bukan level A37.
 
 | Berkas | Keterangan |
 |---|---|
-| **[`PLAN.md`](PLAN.md)** | Dokumen utama. 8 fase, setiap klaim diikat ke sumber yang bisa diverifikasi |
+| **[`PLAN.md`](PLAN.md)** | Dokumen utama (v2, basis UL). 7 fase, setiap klaim diikat ke sumber yang bisa diverifikasi |
+| [`PLAN-ATTEMPT-OFFICIAL.md`](PLAN-ATTEMPT-OFFICIAL.md) | Arsip percobaan pertama (basis official). Dipertahankan karena temuannya masih berlaku |
 | [`ref/evidence/`](ref/evidence/) | Hasil bedah ROM jangkar — `build.prop`, VINTF, simbol HAL1 kamera |
 | `tools/` | Dibawa dari proyek 20: `qbootimg.py`, `sdat2img.py`, `repo-doctor.sh`, `check-drift.sh`, `verify-rom.sh`, `build-kernel-zip.sh`, `triage.sh` |
 
