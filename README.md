@@ -118,16 +118,19 @@ Dokumen pendahulu yang masih berlaku dan **wajib dibaca**:
 
 ## Urutan pengerjaan
 
-Berbeda dari proyek 20: **kamera didahulukan**, karena ia satu-satunya risiko yang belum
-berbatas. Kalau port-nya gagal, seluruh rencana ditinjau ulang — dan itu lebih baik diketahui
-di minggu pertama daripada di fase terakhir.
+**Dibalik dari percobaan pertama.** Di sana kamera didahulukan karena dianggap risiko paling
+tak berbatas. Ternyata kamera bukan yang menggagalkan — boot yang gagal, dan kamera bahkan
+tidak pernah sempat diuji. Kali ini **diagnosis boot didahulukan**, dan tidak ada fitur
+dikerjakan sebelum ada homescreen.
 
 ```
-Fase 0  Persiapan        Fase 4  Device tree
-Fase 1  KAMERA           Fase 5  VINTF & SEPolicy
-Fase 2  Manifest & sync  Fase 6  Vendor blobs
-Fase 3  Delta 20→21      Fase 7  Build
-                         Fase 8  Boot & uji
+Fase 0  Basis bersih + hipotesis boot   ✅ selesai
+Fase 1  Device tree
+Fase 2  Patch yang tetap wajib
+Fase 3  VINTF & SEPolicy
+Fase 4  Build
+Fase 5  Boot
+Fase 6  Fungsi — hanya setelah homescreen
 ```
 
 Kernel tidak punya fase sendiri — A14 tidak menuntut pekerjaan wajib di atas A13.
@@ -138,7 +141,7 @@ Kernel tidak punya fase sendiri — A14 tidak menuntut pekerjaan wajib di atas A
 
 | | |
 |---|---|
-| Device tree | [`rb_device_oppo_A37`](https://github.com/rigaz29/rb_device_oppo_A37) — branch `lineage-21` (dibuat dari `lineage-20` @ `15f7975`) |
+| Device tree | [`rb_device_oppo_A37`](https://github.com/rigaz29/rb_device_oppo_A37) — branch **`lineage-21-ul`** (dibuat dari `lineage-20` @ `15f7975`). Branch `lineage-21` = percobaan pertama, ditinggalkan |
 | Kernel | [`kernel_oppo_msm8939`](https://github.com/rigaz29/kernel_oppo_msm8939) — branch `lineage-21` (dari `lineage-20` @ `8cc1519`, tanpa perubahan wajib) |
 | Vendor blobs | [`rb-vendor_oppo_A37`](https://github.com/rigaz29/rb-vendor_oppo_A37) @ `2e5c6f7` |
 
