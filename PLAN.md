@@ -503,14 +503,29 @@ dari repo lain (`wifi_makefile_goal` mengambil hasil
 Pemblokir ini tidak muncul di percobaan pertama karena susunan repo WLAN di manifest official
 berbeda — contoh konkret bahwa pindah basis memindahkan masalah, bukan hanya menghapusnya.
 
-### Fase 2 — Patch yang tetap wajib meski basis UL
-- [ ] `frameworks/av`: seri kamera HAL1 (2 patch — salin berkas + adaptasi A14). Sudah ada
-      dan **terbukti kompilasi** di `patches/frameworks_av/`
-- [ ] `qcom-caf/msm8916` audio+display: `String8::string()` → `c_str()`
-- [ ] `build/make`: `zip -y` (`non_ab_ota.py`) — UL belum punya
-- [ ] `tools/apply-a37-patches.sh` disesuaikan; `--check` harus hijau
+### Fase 2 — Patch yang tetap wajib meski basis UL ✅ SELESAI
 
-**Kriteria selesai:** `m libcameraservice`, `m cameraserver` rc=0.
+**Kriteria selesai tercapai:** `m libcameraservice cameraserver -j6` rc=0 (29:50, build
+20260810). Artefak: `libcameraservice.a` (24,5 MB), `libcameraservice.so`, dan
+`cameraserver` (32-bit ARM, `system/bin`). `device1/CameraHardwareInterface.cpp` ikut
+terbangun — jalur HAL1 utuh.
+
+- [x] `frameworks/av`: seri kamera HAL1 (2 patch — salin berkas + adaptasi A14).
+      `git am` bersih di atas UL base `d5dc9bb5a7` → `6bf8765674` + `2753f895e3`
+- [x] `qcom-caf/msm8916` audio+display: `String8::string()` → `c_str()` — `1b2c9f8e`,
+      `c9d61b95f`
+- [x] `build/make`: `zip -y` (`non_ab_ota.py`) — `ec839712ab`
+- [x] `tools/apply-a37-patches.sh` — **`--check` hijau seluruhnya** (7 item + 3 penjaga
+      regresi, rc=0)
+
+**Catatan saat eksekusi:**
+- RenderEngine GLES dan adbd FunctionFS ternyata **sudah menyatu di basis UL** — item
+  script yang sama meng-`ok` tanpa kerja. Konsisten dengan tabel §2.
+- Lunch butuh release config eksplisit di UL: `lunch lineage_A37-ap2a-userdebug`
+  (`TARGET_RELEASE` tak disetel device tree; `-userdebug` polos ditolak
+  `release_config.mk:136`). Fase 1 memakai `ap2a` — konsisten dengan `out/`.
+- Peringatan `-Wformat` lama di `CameraProviderManager.cpp` (base UL) tetap ada — bukan
+  regresi patch kita, dan hanya warning.
 
 ### Fase 3 — VINTF & SEPolicy
 - [ ] §4.6 `target-level` + `framework_compatibility_matrix.xml`
