@@ -49,6 +49,66 @@ dan angka 214 KB itu kebetulan. LK OPPO tertutup, jadi tidak bisa dibaca.
 Ujinya murah dan sudah disiapkan: `boot-eng-ramdisk-32m.img` — identik dengan
 `boot-eng.img` kecuali `--ramdisk_offset 0x02000000` (jarak jadi 15 MB).
 
+## Kompatibilitas kernel dengan Android 14 — DIPERIKSA, kernel bukan penyebabnya
+
+Diperiksa 10 Agustus 2026 atas hipotesis: *adbd tidak hidup karena boot belum
+pernah mencapai `on early-init`, akibat kegagalan di level kernel.*
+
+Hipotesisnya masuk akal — kalau kernel gagal sebelum menjalankan init, tidak ada
+yang bisa memicu `androidboot.init_fatal_reboot_target=recovery`, sehingga
+perangkat memang akan diam di logo tanpa USB. Tapi setiap jalur kernel yang bisa
+menghasilkan gejala itu dapat ditutup:
+
+| Jalur kegagalan level kernel | Hasil pemeriksaan |
+|---|---|
+| kernel tidak bisa membuka ramdisk | ramdisk **gzip** (`1f8b 08`), didukung kernel 3.10 tanpa syarat |
+| A14 menuntut fitur kernel baru | **tidak** — lihat pembandingan defconfig di bawah |
+| kernel tidak menemukan `/init` | `/init` ada di akar ramdisk, 2.962.772 B, mode `rwxr-x---` |
+| kernel tidak bisa meng-exec `/init` | ELF **statis**, nol `DT_NEEDED`, nol `PT_INTERP` |
+| arsitektur init salah | ELF ARM **32-bit** — benar untuk userspace 32-bit device ini |
+| kernel arm64 tak bisa jalankan userspace 32-bit | `CONFIG_COMPAT=y` |
+
+### Pembandingan defconfig terhadap kernel yang BENAR-BENAR menjalankan LOS 21
+
+Pembandingnya `acroreiser/android_kernel_lenovo_a6010` branch `lineage-21` —
+msm8916, kernel 3.10.108, dan ROM-nya sudah dibedah di `ref/evidence/`. Branch
+`lineage-21`-nya memang menambahkan seri **Incremental FS** (± 20 commit) dan
+`FROMLIST: security: selinux: allow per-file labelling for binderfs` di atas
+`lineage-20.0`. Tapi defconfig-nya **tidak mengaktifkan** satu pun:
+
+```
+                      a6010 lineage-21   A37
+INCREMENTAL_FS            tidak diset    tidak diset
+ANDROID_BINDERFS          tidak diset    tidak diset
+FS_VERITY                 tidak diset    tidak diset
+BPF_SYSCALL               tidak diset    tidak diset
+CGROUP_BPF                tidak diset    tidak diset
+OVERLAY_FS                tidak diset    tidak diset
+PSI                       tidak diset    tidak diset
+MEMCG                     tidak diset    y          ← kita punya LEBIH
+SDCARD_FS / DM_VERITY / TMPFS_POSIX_ACL      y = y
+```
+
+Jadi kernel 3.10.108 menjalankan Android 14 **tanpa** fitur era-A14 satu pun.
+Commit incfs/binderfs itu dibawa tapi tidak dipakai.
+
+### Apa yang ini TIDAK buktikan
+
+Bahwa init benar-benar berjalan. Yang terbukti hanya: semua yang kernel butuhkan
+untuk menjalankan init sudah benar secara struktural. Dua kelas masih hidup —
+kernel hang sebelum exec init (bukan karena hal-hal di tabel atas), atau init
+jalan lalu **menggantung** (hang tidak memicu `InitFatalReboot`; crash akan).
+
+Pembedanya sudah siap dan sudah diverifikasi isinya:
+`/root/a37-21-archive/boot-panic5.img` — kernel dan ramdisk byte-identik dengan
+`boot-21-userdebug.img`, hanya `panic=5` ditambahkan di cmdline.
+
+```
+flash boot-panic5.img  →  REBOOT BERULANG  = kernel panic, penyebab di kernel
+                       →  tetap diam       = tidak ada panic, kernel hidup,
+                                             macetnya di init atau setelahnya
+```
+
 ## Yang akan menghentikan tebak-tebakan
 
 `ramoops` aktif di cmdline (`ramoops.mem_address=0x9ff00000`). Recovery masih
