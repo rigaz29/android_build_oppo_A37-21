@@ -17,9 +17,12 @@ Qualcomm MSM8916 (Snapdragon 410), kernel 3.10.108 arm64, 2 GB RAM, Adreno 306.
 > `repo init -u https://github.com/LineageOS-UL/android.git -b lineage-21.0`.
 >
 > **Yang tetap wajib meski basis UL** — diverifikasi, bukan diasumsikan:
-> Camera HAL1 `device1/` (tidak ada di UL 21), `zip -y` di `non_ab_ota.py` (belum ada di UL),
-> `hardware/qcom-caf/msm8916` (nol kemunculan di manifest UL), dan `String8::string()` di
-> qcom-caf.
+> Camera HAL1 `device1/` (tidak ada di UL 21), `zip -y` di `non_ab_ota.py`,
+> `PRODUCT_COMPRESSED_APEX := false`, dan `String8::string()` di qcom-caf. Tiga dari empat
+> ada di `build/make` — satu-satunya dari repo itu yang **tidak** di-fork UL.
+>
+> `hardware/qcom-caf/msm8916` dan `device/qcom/sepolicy-legacy` **sudah disediakan UL** lewat
+> `snippets/losul.xml`, sehingga local manifest menyusut dari delapan project jadi tiga.
 >
 > **Yang tidak hilang dari percobaan pertama:** seluruh temuan device tree, VINTF, sepolicy,
 > kamera, dan batas mesin build — dibawa utuh ke §4 `PLAN.md`.

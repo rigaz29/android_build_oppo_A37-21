@@ -2,98 +2,59 @@
 <!--
   Local manifest — LineageOS 21 (Android 14, SDK 34) untuk OPPO A37 / A37f / A37fw.
 
-  Basis: LineageOS/android lineage-21.0 OFFICIAL (manifest 2ea6537, ASB 2026-06).
-  Fungsi legacy dibawa sebagai seri patch di patches/, bukan dengan mem-pin fork UL —
-  mem-pin akan mengunci frameworks/* di ASB lama dan menggugurkan tujuan memakai official.
-  Pola yang sama dengan migrasi official di proyek 20.
+  Basis: LineageOS-UL/android lineage-21.0 (manifest a156f53, 2025-04-04, ASB 2025-03).
 
-  Seluruh SHA diverifikasi 8 Agustus 2026.
+      repo init -u https://github.com/LineageOS-UL/android.git -b lineage-21.0 (plus opsi git-lfs)
+
+  Berkas ini SENGAJA pendek. Percobaan pertama (basis official) butuh delapan project di
+  sini; dengan basis UL hanya tiga yang tersisa, karena UL menyediakan sisanya lewat
+  snippets/losul.xml (61 project fork) dan snippets/lineage.xml.
+
+  Diverifikasi terhadap manifest UL yang ter-checkout, 10 Agustus 2026:
+
+    losul.xml:12   device/qcom/sepolicy-legacy           lineage-21.0-legacy
+    losul.xml:72   hardware/qcom-caf/msm8916/audio       lineage-21.0-caf-msm8916
+    losul.xml:—    hardware/qcom-caf/msm8916/display     lineage-21.0-caf-msm8916
+    losul.xml:—    hardware/qcom-caf/msm8916/media       lineage-21.0-caf-msm8916
+    lineage.xml:163 hardware/sony/timekeep               lineage-21
+
+  Kelimanya DULU ada di berkas ini dan sekarang DIBUANG — mempertahankannya berarti path
+  ganda, dan repo sync akan menolak. Jangan menambahkannya kembali tanpa memeriksa dulu:
+
+    grep -rn "<path yang mau ditambah>" .repo/manifests/*.xml .repo/manifests/snippets/*.xml
+
+  Yang UL TIDAK sediakan dan tetap jadi pekerjaan kita (build/make bukan fork UL):
+    - non_ab_ota.py `zip -y`                     patches/build_make/
+    - PRODUCT_COMPRESSED_APEX := false            PLAN.md §4.8
+    - Camera HAL1 device1/ (tak ada di UL 21)     patches/frameworks_av/
 -->
 <manifest>
 
   <remote name="gh" fetch="https://github.com/" />
 
-  <!-- ================================================================
-       Repo milik proyek
-       ================================================================ -->
+  <!-- Device tree. Basis: lineage-20 @ 15f7975 — tree yang ROM-nya TERPASANG dan masih
+       DIPAKAI di perangkat per 10 Agustus 2026 (boot, Wi-Fi, Bluetooth, RIL berfungsi).
 
-  <!-- Device tree. Basis: lineage-20 @ 15f7975 — tree yang ROM-nya TERPASANG dan
-       DIPAKAI di perangkat (boot, Wi-Fi, Bluetooth, RIL berfungsi). -->
+       Branch lineage-21-ul dibuat BARU dari titik itu, bukan melanjutkan lineage-21
+       (percobaan pertama). Alasannya di PLAN.md §3.1: branch lama memuat workaround yang
+       lahir dari basis official — BOARD_SEPOLICY_M4DEFS dan deklarasi sysfs_disk_stat —
+       yang dengan basis UL sudah tidak berdasar. Memasang ulang secara sadar lebih jujur
+       daripada mewarisi tumpukan yang alasannya sudah berubah. -->
   <project name="rigaz29/rb_device_oppo_A37" path="device/oppo/A37"
-           remote="gh" revision="refs/heads/lineage-21" upstream="lineage-21" />
+           remote="gh" revision="refs/heads/lineage-21-ul" upstream="lineage-21-ul" />
 
-  <!-- Kernel 3.10.108 arm64. Basis: lineage-20 @ 8cc1519, TANPA perubahan wajib —
-       Android 14 tidak menambah syarat kernel keras di atas Android 13
-       (a37-20/PLAN-LOS21.md §1). ROM jangkar a6000 mengonfirmasi: kernel 3.10.108
-       menjalankan A14, hanya versinya dipalsukan jadi 4.9.337 agar lolos VTS. -->
+  <!-- Kernel 3.10.108 arm64, TANPA perubahan wajib. Android 14 tidak menambah syarat
+       kernel keras di atas Android 13. ROM jangkar a6000 mengonfirmasi: kernel 3.10.108
+       menjalankan A14 (versinya dipalsukan jadi 4.9.337 hanya agar lolos VTS — kita tidak
+       menargetkan VTS, jadi spoof itu opsional; lihat PLAN.md §7). -->
   <project name="rigaz29/kernel_oppo_msm8939" path="kernel/oppo/msm8939"
            remote="gh" revision="refs/heads/lineage-21" upstream="lineage-21" />
 
-  <!-- Vendor blobs. Tidak berubah sejak 18.1; 320 blob, 0 hilang di proyek 20. -->
+  <!-- Vendor blobs. Tidak berubah sejak 18.1; 320 blob, 0 hilang di proyek 20.
+       Percobaan pertama mengukur 162 dependensi DT_NEEDED: 5 tak tersedia, dan kelimanya
+       juga tidak ada di ROM 20 yang berjalan — jadi nol regresi. -->
   <project name="rigaz29/rb-vendor_oppo_A37" path="vendor/oppo"
            remote="gh" revision="2e5c6f7ffcccbbf1430f8fa13fc530e1cae5feab"
            upstream="lineage-18.1" />
-
-  <!-- ================================================================
-       hardware/qcom-caf untuk msm8916 — WAJIB
-       ================================================================
-       Manifest LineageOS 21 official TIDAK menyediakan qcom-caf/msm8916
-       (diverifikasi: tidak ada path itu di default.xml maupun snippets).
-       Tanpa tiga baris ini, `enforce-product-packages-exist` menolak build dengan
-       ~20 modul hilang: audio.primary.msm8916, libOmx*, libmm-omxcore,
-       libstagefrighthw, libqcom{postprocbundle,visualizer,voiceprocessing},
-       copybit/gralloc/hwcomposer/memtrack.msm8916.
-
-       LEBIH BAIK DARI PROYEK 20: di 20 kita terpaksa mem-pin
-       lineage-19.0-caf-msm8916 (dua versi di belakang) karena hulu mencabut
-       msm8916. Untuk 21, UL menyediakan lineage-21.0-caf-msm8916 — SEZAMAN
-       dengan basisnya.
-
-       ⚠️ Nama branch bukan jaminan isi. Bandingkan terhadap lineage-19.0-caf-msm8916
-       yang terbukti jalan di proyek 20 sebelum menganggapnya setara. -->
-  <project name="LineageOS-UL/android_hardware_qcom_audio" path="hardware/qcom-caf/msm8916/audio"
-           remote="gh" revision="4eeadcd50dbccabe53da1114858ea373203bac44"
-           upstream="lineage-21.0-caf-msm8916" groups="qcom,qcom_audio,pdk-qcom" />
-  <project name="LineageOS-UL/android_hardware_qcom_display" path="hardware/qcom-caf/msm8916/display"
-           remote="gh" revision="6d408c97b324217f465fbb4d06905d2f8d6f5585"
-           upstream="lineage-21.0-caf-msm8916" groups="qcom,qcom_display,pdk-qcom" />
-  <project name="LineageOS-UL/android_hardware_qcom_media" path="hardware/qcom-caf/msm8916/media"
-           remote="gh" revision="ee0cb10a3b8388bd24f78530b64204aeb185affc"
-           upstream="lineage-21.0-caf-msm8916" groups="qcom,pdk-qcom" />
-
-  <!-- ================================================================
-       Pelengkap yang tidak ada di manifest official
-       ================================================================ -->
-
-  <!-- sepolicy-legacy — WAJIB: device/oppo/A37/BoardConfig.mk:435 melakukan
-       `include device/qcom/sepolicy-legacy/sepolicy.mk`. Repo ini hanya ada di UL. -->
-  <project name="LineageOS-UL/android_device_qcom_sepolicy" path="device/qcom/sepolicy-legacy"
-           remote="gh" revision="3fc6662b09bae2307a64cce5dca8e28ef43edc70"
-           upstream="lineage-21.0-legacy" groups="qcom,pdk-qcom" />
-
-  <!-- timekeep — dependensi device/oppo/A37/lineage.dependencies.
-       Menyediakan modul TimeKeep dan timekeep. -->
-  <project name="LineageOS/android_hardware_sony_timekeep" path="hardware/sony/timekeep"
-           remote="gh" revision="11c1535c71b97f0ab833e215a8121ed107235010"
-           upstream="lineage-21" />
-
-  <!-- ================================================================
-       CATATAN — yang TIDAK diselesaikan lewat manifest
-       ================================================================
-       Empat modul di PRODUCT_PACKAGES device tree kita TIDAK ADA di LineageOS 21
-       dan TIDAK bisa diperbaiki dengan menambah repo, karena hulu memang
-       mencabutnya di Android 14. Semuanya butir DEVICE TREE (Fase 4):
-
-         vendor.lineage.trust@1.0-service     Trust HAL legacy dicabut di 21.
-                                              meghs juga membuangnya di lineage-21
-                                              ("Drop legacy trust HAL — dead").
-         android.hardware.wifi@1.0-service    Wi-Fi HAL pindah ke AIDL di A14.
-         android.hardware.drm@1.4-service.clearkey
-                                              clearkey pindah ke AIDL di A14.
-                                              Sekelas dengan perubahan @1.3 -> @1.4
-                                              yang dikerjakan di proyek 20.
-         com.android.tethering.inprocess      varian APEX berubah nama di A14.
-
-       Jangan mencoba menambal ini lewat manifest. -->
 
 </manifest>

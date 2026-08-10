@@ -108,15 +108,37 @@ $ curl -s api.github.com/repos/LineageOS-UL/android/commits?sha=lineage-21.0
 **Beku sejak April 2025, ASB 2025-03.** Ini fakta, bukan tuduhan — dan §2 membahas
 konsekuensinya secara terbuka.
 
-Yang UL **tidak** sediakan, meski basisnya dipakai (diverifikasi di `snippets/lineage.xml`,
-nol kemunculan `msm8916`):
+Manifest UL punya **tiga** berkas, dan yang ketiga menentukan:
 
 ```
-hardware/qcom-caf/msm8916/{audio,display,media}     tidak ada di manifest UL
-device/qcom/sepolicy-legacy                          tidak ada (hanya -um dan _vndr)
+default.xml           1287 project   AOSP
+snippets/lineage.xml   149 project   LineageOS
+snippets/losul.xml      61 project   fork UL  ← inilah isinya
 ```
 
-Keduanya tetap harus dibawa lewat local manifest — persis seperti sekarang.
+`losul.xml` menyediakan justru yang kita kira harus dibawa sendiri:
+
+```
+losul.xml   device/qcom/sepolicy-legacy          lineage-21.0-legacy
+losul.xml   hardware/qcom-caf/msm8916/audio      lineage-21.0-caf-msm8916
+losul.xml   hardware/qcom-caf/msm8916/display    lineage-21.0-caf-msm8916
+losul.xml   hardware/qcom-caf/msm8916/media      lineage-21.0-caf-msm8916
+```
+
+⚠️ **Koreksi terhadap draf pertama dokumen ini.** Draf itu menyatakan UL tidak menyediakan
+msm8916, berdasarkan `grep msm8916 snippets/lineage.xml` yang memang menghasilkan nol.
+Kesimpulannya salah karena `losul.xml` tidak pernah ikut diperiksa. Akibatnya nyata:
+local manifest menyusut dari delapan project jadi **tiga** (device tree, kernel, vendor).
+Aturan yang lahir dari kekeliruan ini: sebelum menambah project ke local manifest,
+grep **seluruh** `.repo/manifests/*.xml` dan `snippets/*.xml`, bukan satu berkas.
+
+61 repo yang UL fork mencakup semua yang percobaan pertama tambal tangan — `frameworks/av`,
+`frameworks/base`, `frameworks/native`, `packages/modules/adb`, `system/core`,
+`system/sepolicy`, `system/bpf`, `hardware/qcom-caf/common`, `hardware/ril`,
+`frameworks/opt/telephony`, `bionic`, `art`.
+
+**`build/make` TIDAK termasuk.** Itu menjelaskan kenapa retiredtab harus mengirim
+`build-aug-2024.patch` terpisah, dan kenapa dua butir di §2 tetap jadi pekerjaan kita.
 
 ### 1.5 Jangkar E — percobaan pertama (basis official), dan apa yang ia buktikan
 
@@ -166,10 +188,14 @@ demi ini.
 | eBPF non-fatal, memfd gate | ✅ ada | seri T0 menyatu di basis |
 | **Camera HAL1 `device1/`** | ❌ **tidak ada** | API GitHub: `device1` TIDAK ADA di UL 21 |
 | **`zip -y` saat kemas OTA** | ❌ **tidak ada** | `non_ab_ota.py:608` UL masih `["zip", tmpfile, "-r", ".", "-0"]` |
-| `hardware/qcom-caf/msm8916` | ❌ tidak di manifest | nol `msm8916` di `snippets/lineage.xml` |
+| **`PRODUCT_COMPRESSED_APEX`** | ❌ masih `true` | `build/make` bukan fork UL (§1.4) |
+| `hardware/qcom-caf/msm8916` | ✅ **ada** | `snippets/losul.xml` — lihat koreksi §1.4 |
+| `device/qcom/sepolicy-legacy` | ✅ **ada** | `snippets/losul.xml` |
 | `String8::string()` di qcom-caf msm8916 | ❌ masih dipakai | audio 11 titik, display 4 titik |
 
-Empat baris ❌ itulah pekerjaan sesungguhnya rencana ini.
+Empat baris ❌ itulah pekerjaan sesungguhnya rencana ini. Perhatikan polanya: tiga dari
+empat ada di `build/make` atau `frameworks/av` — dua repo yang UL **tidak** fork atau fork
+tanpa membawa HAL1.
 
 ---
 
@@ -343,14 +369,28 @@ kamera bahkan tidak pernah sempat diuji. Kali ini **boot didahulukan**, dan tida
 yang dikerjakan sebelum ada homescreen.
 
 ### Fase 0 — Basis bersih dan hipotesis boot yang belum gugur
-- [ ] `repo init` UL `lineage-21.0`, sync, `tools/repo-doctor.sh`
-- [ ] Local manifest `A37-21.xml`: device tree (branch baru `lineage-21-ul`), kernel, vendor,
-      `qcom-caf/msm8916` ×3, `sepolicy-legacy`, `timekeep` — semua SHA di-pin
+
+- [x] **Tree lama dihapus.** `/root/los21` basis official (260 GB) dibuang setelah
+      diverifikasi: tujuh repo yang kita ubah semuanya bersih tanpa commit tertinggal, dan
+      keempat patch yang §5 Fase 2 sebut wajib sudah ada di repo yang ter-push. Disk
+      31 GB → 290 GB. Diamankan ke `/root/a37-21-archive/`: ROM `20260810_034817` (693 MB,
+      untuk diagnosis ramoops), `boot-panic5.img`, `boot-21-userdebug.img`.
+      `/root/.ccache` (7,6 GB) di luar tree, selamat.
+- [x] **`repo init`** UL `lineage-21.0` → manifest `a156f53`, cocok dengan §1.4.
+- [x] **Branch device tree `lineage-21-ul`** dibuat dari `lineage-20` @ `15f7975` dan
+      di-push. Sengaja BUKAN melanjutkan `lineage-21` (§3.1).
+- [x] **Local manifest** — **tiga** project saja (device tree, kernel, vendor), turun dari
+      delapan. Resolve bersih: 1453 project, nol path ganda. Lihat koreksi §1.4.
+- [ ] **`repo sync`** — berjalan (`tools/sync-ul.sh`, retry sampai 8×, log `$TREE/sync.log`)
 - [ ] **Uji hipotesis yang tertinggal dari percobaan 1, sebelum apa pun dibangun:**
       `PRODUCT_COMPRESSED_APEX := false` (§4.8), dan `boot-panic5.img` untuk memisahkan
       panic vs hang
 - [ ] Ambil `console-ramoops` dari recovery setelah kegagalan berikutnya — ini masih
       satu-satunya sumber yang mengubah tebakan jadi jawaban
+
+> ⚠️ **Jalan pulang belum ada di mesin ini.** ROM LOS 20 tidak tersimpan lokal (dicek: nol
+> hasil). Sebelum mem-flash 21 lagi untuk ramoops, unduh dulu
+> `lineage-20.0-20260808_130815` dari Releases proyek 20.
 
 **Kriteria selesai:** penyebab stuck-di-logo teridentifikasi, atau tiga hipotesis di atas
 tergugur dengan bukti.
@@ -431,6 +471,9 @@ curl -s "https://api.github.com/repos/LineageOS-UL/android_frameworks_av/content
 
 # §2 UL 21 belum punya zip -y
 curl -s https://raw.githubusercontent.com/LineageOS-UL/android_build/lineage-21.0/tools/releasetools/non_ab_ota.py | grep -n '"zip", tmpfile'
+
+# §1.4 koreksi: losul.xml-lah yang menyediakan msm8916, BUKAN lineage.xml
+grep -rn "msm8916/audio" .repo/manifests/*.xml .repo/manifests/snippets/*.xml
 
 # §4.8 jumlah apex terkompresi
 ls out/target/product/A37/system/apex/*.capex | wc -l
