@@ -682,6 +682,35 @@ installed-files.txt         /system/vendor/bin/bootwatchdog.sh  4364 B
 ROM memakai `system.new.dat`, jadi isi system.img tidak muncul di daftar zip.
 Instrumen yang benar `installed-files.txt`.
 
+#### 4.a Build diagnostik `20260811_065240` — gadget USB dipindah ke `on init`
+
+Menindaklanjuti flash build `024200` yang tetap diam di logo OPPO tanpa entri USB:
+karena `setprop sys.usb.config mtp,adb` sudah ada di `on fs` (commit `0345221`) dan
+USB tetap nol, hang terbukti terjadi **sebelum `on fs`**. Seluruh blok gadget
+(mkdir/mount functionfs + setprop) digeser ke **`on init`** — fase userspace paling
+awal setelah second-stage init mulai (`system/core/init/init.cpp:343` memuat rc
+dari /system setelah mount, dan trigger `init` dieksekusi sebelum `late-init`).
+
+```
+on init   → setprop sys.usb.config mtp,adb   (USB bisa muncul, penanda biner)
+on fs     → kosong (blok dipindah)
+```
+
+Dengan gadget `android_usb` legacy (bukan FunctionFS murni), host melihat perangkat
+USB begitu `write enable 1` dieksekusi — **tanpa adbd**. Interpretasi hasil flash:
+
+| Hasil | Arti |
+|---|---|
+| USB muncul | init hidup ≥ `on init`; hang di userspace awal; `logcat -d`/`dmesg` bisa ditarik |
+| USB tetap nol | hang sebelum trigger `init` (kernel hang dini / init gagal awal); alatnya ramoops |
+
+Build: `m bacon -j6` rc=0 (06:13 inkremental) →
+`lineage-21.0-20260811_065240-UNOFFICIAL-A37.zip`. Verifikasi ulang: `verify-rom.sh`
+SEMUA LOLOS, dan system.img di dalam zip (sdat2img + debugfs) memuat blok `on init`.
+⚠️ Ketiga zip (`_024200`, `_065240`, `ota`) menunjuk inode yang sama — perilaku
+"mka bacon menulis ke inode yang sama" yang sudah dicatat di lineage_A37.mk; isinya
+build terbaru.
+
 ### Fase 5 — Boot
 - [ ] Flash, dan **kalau gagal, ambil `console-ramoops` sebelum mencoba apa pun**
 - [ ] Jalan pulang disiapkan lebih dulu: `lineage-20.0-20260808_130815` dari Releases proyek
