@@ -451,41 +451,54 @@ itu konsisten pada waktunya." Tidak. Fork UL sebagian **mendahului** official
 snapshot koheren dari satu titik waktu — tidak ada satu tanggal yang
 menyelaraskan semuanya.
 
-#### Yang dipakai: SATU penggulungan + SATU tambalan
+#### Yang dipakai: 26 penggulungan terarah + 1 tambalan
 
-Neraca akhir, setiap keputusan punya kegagalan build di belakangnya:
+Neraca akhir setelah ROM berhasil dibangun. Setiap keputusan punya kegagalan build
+nyata di belakangnya, KECUALI kelompok aplikasi (ditandai).
 
-| Repo | Keputusan | Ongkos |
+| Repo | Keputusan | Bukti |
 |---|---|---|
-| `lineage-sdk` | tergulung ke `c354639c` (2025-04-01) | nol tambalan |
-| `packages/modules/IntentResolver` | **tip** + tambal satu pemanggilan | 1 baris efektif |
-| 44 repo lain | tip | nol |
+| `lineage-sdk` | tergulung 2025-04-01 | `onBeforeUserSwitching(int)` |
+| `packages/services/Mms` | tergulung 2025-04-01 | `IMms.addMultimediaMessageDraft` |
+| 24 repo **aplikasi** | tergulung ≤ 2025-04-04 | `Trebuchet` gagal; 23 lain **antisipatif** |
+| `packages/modules/IntentResolver` | **tip** + tambal 1 pemanggilan | penggulungan berantai ke `Flags.kt` |
+| `Wifi`, `MediaProvider`, sisanya | tip | penggulungan MERUSAK |
 
-`IntentResolver` sempat digulung juga, lalu **dibalik**. Penggulungannya menuntut
-dua penyesuaian yang makin dalam — `truth-prebuilt` → `truth` (masih mekanis),
-lalu type mismatch Kotlin di `Flags.kt` (`Int`/`String`/`Boolean`). Yang kedua itu
-adaptasi kode, bukan penggantian nama, jadi menambal di tip jadi lebih murah:
+**Total 26 repo tergulung** dari 1451. Bukan 45 seperti percobaan pertama, dan bukan
+198 — angka itu keliru kalau dihitung dari tanggal HEAD, karena sebagian besar repo
+memang tidak punya commit baru sejak 2025-04 tanpa campur tangan siapa pun. Ukuran
+yang benar: HEAD sengaja di belakang tip branch-nya.
+
+`IntentResolver` sempat digulung lalu **dibalik** — penggulungannya menuntut
+`truth-prebuilt` → `truth` (mekanis) lalu type mismatch Kotlin di `Flags.kt`
+(adaptasi kode). Ditambal di tip: `PackageManager` fork UL tidak punya
+`resolveActivityAsUser(Intent, String, int, int)`, jadi didelegasikan ke overload
+tiga argumen. **Setara secara perilaku** — `resolvedType` di pemanggil berasal dari
+`intentReceived.resolveTypeIfNeeded()`, dan overload tiga argumen menurunkannya
+dengan cara yang sama. Tersimpan di `patches/packages_modules_IntentResolver/`.
+
+#### Heuristik yang DICABUT: pemeriksaan "daun"
+
+Sempat dibuat pemeriksaan otomatis — repo yang modulnya tidak dirujuk repo lain
+dianggap "daun" dan aman digulung. **Jangan dipakai.** Hasilnya sendiri
+membuktikannya salah:
 
 ```
-IntentForwarderActivity.java:429
-  PackageManager fork UL tidak punya resolveActivityAsUser(Intent, String, int, int)
-  -> delegasikan ke overload tiga argumen
+packages/providers/MediaProvider   0 dipakai di luar  ->  "DAUN, gulung"
+packages/modules/Wifi              0 dipakai di luar  ->  "DAUN, gulung"
 ```
 
-Penyesuaian itu **setara secara perilaku**, bukan sekadar membuang argumen:
-`resolvedType` di pemanggil (baris 133) berasal dari
-`intentReceived.resolveTypeIfNeeded(getContentResolver())`, dan overload tiga
-argumen menurunkan tipe dengan `resolveTypeIfNeeded()` yang sama. Tersimpan di
-`patches/packages_modules_IntentResolver/`.
+Kedua repo itu terbukti RUSAK saat digulung. Dua celahnya:
 
-**Aturan yang lahir dari ini:** kalau sebuah penggulungan mulai menuntut adaptasi
-kode (bukan nama modul atau properti build), batalkan penggulungannya dan tambal
-di tip. Penggulungan hanya menang selama ongkosnya mekanis.
+1. `frameworks/base` merujuk `framework-pdf` sebagai
+   `framework-pdf.stubs.source.api.contribution` — **nama turunan** yang soong
+   bentuk dengan sufiks, jadi grep untuk `"framework-pdf"` berkutip tidak cocok.
+2. Kelas kegagalan properti build (`pdk`) tidak melibatkan rujukan modul sama
+   sekali, jadi pemeriksaan apa pun atas nama modul buta terhadapnya.
 
-Keadaannya dibekukan di [`A37-21-pinned.xml`](A37-21-pinned.xml) (1451 project
-ter-pin ke SHA). **Tanpa berkas itu, `repo sync` berikutnya menarik ulang drift
-yang sama.** `tools/align-base-date.sh` dipertahankan hanya untuk MENGUKUR skew;
-default-nya dry run, dengan peringatan agar tidak diterapkan menyeluruh.
+Kriteria yang tersisa dan terbukti: **gulung apa yang kegagalan build nyata
+tunjukkan, satu per satu.** Mahal dalam siklus build (~20–60 menit per putaran),
+tapi satu-satunya yang tidak memperkenalkan kerusakan baru.
 
 #### Pelajaran proses: dry run menyelamatkan dari kerusakan senyap
 
@@ -648,9 +661,26 @@ terbangun — jalur HAL1 utuh.
 
 **Kriteria selesai:** `m check-vintf-all sepolicy_freeze_test selinux_policy` rc=0.
 
-### Fase 4 — Build
-- [ ] `m bacon -j6` dengan setelan §4.10
-- [ ] `tools/verify-rom.sh` hijau seluruhnya
+### Fase 4 — Build ✅ SELESAI
+
+- [x] **`m bacon -j6` rc=0**, 1:04:32 → `lineage-21.0-20260811_024200-UNOFFICIAL-A37.zip`
+      (721.082.927 B). Butuh tujuh putaran: enam pemblokir skew basis (§4.11) plus dua
+      build yang dihentikan dari luar oleh SIGTERM (tree dipakai bersama agen lain).
+- [x] **`tools/verify-rom.sh` SEMUA VERIFIKASI LOLOS** — 320 blob lengkap, sepolicy split
+      A14 benar, adbd jalur legacy FunctionFS terdeteksi, boot.img pagesize/addr/dt_size
+      cocok referensi. ⚠️ Skripnya default ke `/root/los20`; jalankan dengan path
+      eksplisit: `verify-rom.sh /root/los21/out/target/product/A37`.
+- [x] **Tiga fitur baru diverifikasi di artefak yang DIKIRIM**, bukan di berkas antara:
+
+```
+boot.img cmdline            ramoops.console_size=0x100000 pmsg_size=0x40000 dump_oops=1
+boot.img ramdisk            /adb_keys, /init
+installed-files.txt         /system/vendor/bin/bootwatchdog.sh  4364 B
+```
+
+⚠️ `unzip -l <rom>.zip | grep bootwatchdog` menghasilkan **nol** dan itu MENYESATKAN —
+ROM memakai `system.new.dat`, jadi isi system.img tidak muncul di daftar zip.
+Instrumen yang benar `installed-files.txt`.
 
 ### Fase 5 — Boot
 - [ ] Flash, dan **kalau gagal, ambil `console-ramoops` sebelum mencoba apa pun**
