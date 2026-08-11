@@ -404,6 +404,85 @@ tahap pengemasan (`zip` gagal dengan exit 14 saat ruang menipis).
 
 ---
 
+### 4.11 BARU — skew waktu antara fork UL dan repo official
+
+Temuan terpenting dari Fase 4, dan ongkos memakai UL yang §2 belum sebutkan.
+
+Manifest UL beku 2025-04-04, tapi `<default revision="refs/heads/lineage-21.0">`
+membuat repo yang **tidak** di-fork UL melacak **tip** LineageOS official. Men-sync
+manifest itu pada Agustus 2026 menarik ~16 bulan drift official ke dalam basis beku:
+
+```
+frameworks/base     2025-04-04   fork UL      beku
+frameworks/native   2025-04-04   fork UL      beku
+build/soong         2025-04-04   fork UL      beku
+lineage-sdk         (tip)        official     maju 16 bulan
+IntentResolver      2025-12-29   official     maju 8 bulan
+```
+
+Repo AOSP **tidak** terpengaruh: remote `aosp` mem-pin
+`revision="refs/tags/android-14.0.0_r67"`, jadi 1168 repo itu memang beku.
+Terukur: **37 dari 250** repo yang berkompilasi terhadap API framework melewati
+titik beku UL.
+
+Gejalanya kegagalan build yang tampak acak di repo yang tidak kita sentuh:
+
+```
+lineage-sdk       … does not override abstract method onBeforeUserSwitching(int)
+IntentResolver    … no suitable method found for resolveActivityAsUser(…,int,int)
+```
+
+#### Penyelarasan tanggal menyeluruh: DICOBA, GAGAL
+
+Menggulung 45 repo official ke ≤ 2025-04-04 terlihat seperti perbaikan di akar.
+Hasil nyatanya seimbang ke arah lain:
+
+| | |
+|---|---|
+| ✅ `lineage-sdk` | `onBeforeUserSwitching` beres |
+| ✅ `packages/modules/IntentResolver` | `resolveActivityAsUser` beres |
+| ❌ `packages/modules/Wifi` | soong UL sudah mencabut `pdk`, revisi lama masih memakainya |
+| ❌ `packages/providers/MediaProvider` | `framework-pdf` belum ada, padahal `frameworks/base` UL memerlukannya |
+| ? 41 lainnya | tidak teruji |
+
+**Asumsi yang gugur:** "saat UL beku, official juga di April 2025, jadi manifest
+itu konsisten pada waktunya." Tidak. Fork UL sebagian **mendahului** official
+(soong mencabut `pdk` lebih dulu) dan sebagian **tertinggal**. Basis UL bukan
+snapshot koheren dari satu titik waktu — tidak ada satu tanggal yang
+menyelaraskan semuanya.
+
+#### Yang dipakai: penggulungan TERARAH
+
+Gulung **hanya** repo yang kegagalan build nyata membuktikan perlu:
+
+```
+lineage-sdk                      -> c354639c  2025-04-01
+packages/modules/IntentResolver  -> dcaa194   2025-02-05
+44 repo lain                     -> kembali ke tip
+```
+
+Ongkos lanjutannya kecil dan sekelas — nama modul atau properti build yang
+berubah di sekitar repo tergulung, bukan adaptasi API:
+
+```
+IntentResolver/java/tests/Android.bp   truth-prebuilt -> truth  (modul TES)
+```
+
+Keadaannya dibekukan di [`A37-21-pinned.xml`](A37-21-pinned.xml) (1451 project
+ter-pin ke SHA). **Tanpa berkas itu, `repo sync` berikutnya menarik ulang drift
+yang sama.** `tools/align-base-date.sh` dipertahankan hanya untuk MENGUKUR skew;
+default-nya dry run, dengan peringatan agar tidak diterapkan menyeluruh.
+
+#### Pelajaran proses: dry run menyelamatkan dari kerusakan senyap
+
+Skrip pemulihan pertama mendaftar **107** repo padahal hanya 45 yang digulung.
+Sebabnya `device/qcom/sepolicy-legacy-um` dan sejenisnya ter-pin ke branch **lain**
+di manifest (`lineage-21.0-legacy-um`), sementara skrip membandingkannya terhadap
+`github/lineage-21.0`. Menjalankannya akan memindahkan puluhan repo ke branch yang
+salah — kerusakan senyap yang jauh lebih sulit dilacak daripada build gagal.
+Aturannya: operasi massal atas repo **wajib** dry run dulu, dan revisi tiap repo
+dibaca dari `repo manifest`, tidak diasumsikan.
+
 ## 5. Fase
 
 Urutan berbeda dari percobaan pertama. Di sana kamera didahulukan karena dianggap risiko
