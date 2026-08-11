@@ -451,22 +451,36 @@ itu konsisten pada waktunya." Tidak. Fork UL sebagian **mendahului** official
 snapshot koheren dari satu titik waktu — tidak ada satu tanggal yang
 menyelaraskan semuanya.
 
-#### Yang dipakai: penggulungan TERARAH
+#### Yang dipakai: SATU penggulungan + SATU tambalan
 
-Gulung **hanya** repo yang kegagalan build nyata membuktikan perlu:
+Neraca akhir, setiap keputusan punya kegagalan build di belakangnya:
+
+| Repo | Keputusan | Ongkos |
+|---|---|---|
+| `lineage-sdk` | tergulung ke `c354639c` (2025-04-01) | nol tambalan |
+| `packages/modules/IntentResolver` | **tip** + tambal satu pemanggilan | 1 baris efektif |
+| 44 repo lain | tip | nol |
+
+`IntentResolver` sempat digulung juga, lalu **dibalik**. Penggulungannya menuntut
+dua penyesuaian yang makin dalam — `truth-prebuilt` → `truth` (masih mekanis),
+lalu type mismatch Kotlin di `Flags.kt` (`Int`/`String`/`Boolean`). Yang kedua itu
+adaptasi kode, bukan penggantian nama, jadi menambal di tip jadi lebih murah:
 
 ```
-lineage-sdk                      -> c354639c  2025-04-01
-packages/modules/IntentResolver  -> dcaa194   2025-02-05
-44 repo lain                     -> kembali ke tip
+IntentForwarderActivity.java:429
+  PackageManager fork UL tidak punya resolveActivityAsUser(Intent, String, int, int)
+  -> delegasikan ke overload tiga argumen
 ```
 
-Ongkos lanjutannya kecil dan sekelas — nama modul atau properti build yang
-berubah di sekitar repo tergulung, bukan adaptasi API:
+Penyesuaian itu **setara secara perilaku**, bukan sekadar membuang argumen:
+`resolvedType` di pemanggil (baris 133) berasal dari
+`intentReceived.resolveTypeIfNeeded(getContentResolver())`, dan overload tiga
+argumen menurunkan tipe dengan `resolveTypeIfNeeded()` yang sama. Tersimpan di
+`patches/packages_modules_IntentResolver/`.
 
-```
-IntentResolver/java/tests/Android.bp   truth-prebuilt -> truth  (modul TES)
-```
+**Aturan yang lahir dari ini:** kalau sebuah penggulungan mulai menuntut adaptasi
+kode (bukan nama modul atau properti build), batalkan penggulungannya dan tambal
+di tip. Penggulungan hanya menang selama ongkosnya mekanis.
 
 Keadaannya dibekukan di [`A37-21-pinned.xml`](A37-21-pinned.xml) (1451 project
 ter-pin ke SHA). **Tanpa berkas itu, `repo sync` berikutnya menarik ulang drift

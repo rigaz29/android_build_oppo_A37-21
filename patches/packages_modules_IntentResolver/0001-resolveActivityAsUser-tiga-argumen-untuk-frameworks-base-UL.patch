@@ -1,0 +1,39 @@
+diff --git a/java/src/com/android/intentresolver/IntentForwarderActivity.java b/java/src/com/android/intentresolver/IntentForwarderActivity.java
+index 692903e..a3d51a7 100644
+--- a/java/src/com/android/intentresolver/IntentForwarderActivity.java
++++ b/java/src/com/android/intentresolver/IntentForwarderActivity.java
+@@ -428,9 +428,32 @@ public class IntentForwarderActivity extends Activity  {
+         @Nullable
+         public CompletableFuture<ResolveInfo> resolveActivityAsUser(Intent intent,
+                 String resolvedType, int flags, int userId) {
++            // resolvedType SENGAJA tidak diteruskan.
++            //
++            // PackageManager di frameworks/base fork LineageOS-UL tidak punya
++            // overload resolveActivityAsUser(Intent, String, int, int); yang ada
++            // hanya versi tiga argumen. Tanpa penyesuaian ini build gagal:
++            //
++            //   IntentForwarderActivity.java:432: error: no suitable method found
++            //   for resolveActivityAsUser(Intent,String,int,int)
++            //
++            // Mendelegasikan ke versi tiga argumen SETARA secara perilaku di sini,
++            // bukan sekadar membuang argumen:
++            //
++            //   - resolvedType di pemanggil (baris 133) berasal dari
++            //     intentReceived.resolveTypeIfNeeded(getContentResolver())
++            //   - PackageManager.resolveActivityAsUser(intent, flags, userId)
++            //     menurunkan tipe dengan resolveTypeIfNeeded() yang sama
++            //
++            // Jadi tipe yang dipakai untuk resolusi identik; satu-satunya beda
++            // adalah tipe itu diturunkan ulang alih-alih diteruskan.
++            //
++            // Ditambal di sini, BUKAN dengan menggulung repo ini ke revisi lama:
++            // penggulungan sudah dicoba dan menuntut adaptasi Kotlin di Flags.kt
++            // (type mismatch Int/String/Boolean) — jauh lebih dalam daripada satu
++            // pemanggilan ini. Lihat PLAN.md §4.11.
+             return CompletableFuture.supplyAsync(
+-                    () -> getPackageManager().resolveActivityAsUser(intent,
+-                            resolvedType, flags, userId));
++                    () -> getPackageManager().resolveActivityAsUser(intent, flags, userId));
+         }
+ 
+         @Override
