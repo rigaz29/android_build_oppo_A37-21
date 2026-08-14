@@ -67,13 +67,16 @@
   <!-- Device tree. Basis: lineage-20 @ 15f7975 — tree yang ROM-nya TERPASANG dan masih
        DIPAKAI di perangkat per 10 Agustus 2026 (boot, Wi-Fi, Bluetooth, RIL berfungsi).
 
-       Branch lineage-21-ul dibuat BARU dari titik itu, bukan melanjutkan lineage-21
-       (percobaan pertama). Alasannya di PLAN.md §3.1: branch lama memuat workaround yang
-       lahir dari basis official — BOARD_SEPOLICY_M4DEFS dan deklarasi sysfs_disk_stat —
-       yang dengan basis UL sudah tidak berdasar. Memasang ulang secara sadar lebih jujur
-       daripada mewarisi tumpukan yang alasannya sudah berubah. -->
+       Branch lineage-21-ul dibuat BARU dari titik itu untuk basis UL, dan di sanalah
+       empat lapis kegagalan boot diperbaiki (sampai 2941d27). Sejak pindah KEMBALI ke
+       basis official (14 Agustus 2026), branch lineage-21 dibuat dari lineage-21-ul @
+       2941d27 — isinya identik, namanya mengikuti era official — supaya lineage-21-ul
+       tetap BEKU sebagai pasangan resep rollback UL (A37-21-pinned-UL-bootok.xml).
+       Perubahan device tree untuk basis official masuk ke lineage-21, jangan pernah ke
+       lineage-21-ul. Branch lineage-21 lama milik percobaan pertama diarsipkan sebagai
+       tag archive/lineage-21-percobaan1 sebelum diganti. -->
   <project name="rigaz29/rb_device_oppo_A37" path="device/oppo/A37"
-           remote="gh" revision="refs/heads/lineage-21-ul" upstream="lineage-21-ul" />
+           remote="gh" revision="refs/heads/lineage-21" upstream="lineage-21" />
 
   <!-- Kernel 3.10.108 arm64, TANPA perubahan wajib. Android 14 tidak menambah syarat
        kernel keras di atas Android 13. ROM jangkar a6000 mengonfirmasi: kernel 3.10.108

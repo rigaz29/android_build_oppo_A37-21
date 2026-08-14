@@ -310,7 +310,7 @@ tidak — supaya tidak ada resolusi diam-diam. Terpakai 5 kali: 4× `vendor/line
 
 | | |
 |---|---|
-| Device tree | `rigaz29/rb_device_oppo_A37` — branch **baru** `lineage-21-ul`, dibuat dari `lineage-20` @ `15f7975` |
+| Device tree | `rigaz29/rb_device_oppo_A37` — branch **`lineage-21`**, dibuat 14 Agustus 2026 dari `lineage-21-ul` @ `2941d27` untuk era official; `lineage-21-ul` dibekukan sebagai pasangan resep rollback UL. Branch `lineage-21` lama (percobaan pertama) diarsipkan sebagai tag `archive/lineage-21-percobaan1` |
 | Kernel | `rigaz29/kernel_oppo_msm8939` — branch `lineage-21` @ `8cc1519` (tanpa perubahan wajib) |
 | Vendor blobs | `rigaz29/rb-vendor_oppo_A37` @ `2e5c6f7` — 320 blob, tidak berubah sejak 18.1 |
 

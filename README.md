@@ -141,7 +141,7 @@ Kernel tidak punya fase sendiri — A14 tidak menuntut pekerjaan wajib di atas A
 
 | | |
 |---|---|
-| Device tree | [`rb_device_oppo_A37`](https://github.com/rigaz29/rb_device_oppo_A37) — branch **`lineage-21-ul`** (dibuat dari `lineage-20` @ `15f7975`). Branch `lineage-21` = percobaan pertama, ditinggalkan |
+| Device tree | [`rb_device_oppo_A37`](https://github.com/rigaz29/rb_device_oppo_A37) — branch **`lineage-21`** (14 Agustus 2026, dari `lineage-21-ul` @ `2941d27`); `lineage-21-ul` beku untuk rollback UL. Branch `lineage-21` lama percobaan pertama diarsipkan sebagai tag `archive/lineage-21-percobaan1` |
 | Kernel | [`kernel_oppo_msm8939`](https://github.com/rigaz29/kernel_oppo_msm8939) — branch `lineage-21` (dari `lineage-20` @ `8cc1519`, tanpa perubahan wajib) |
 | Vendor blobs | [`rb-vendor_oppo_A37`](https://github.com/rigaz29/rb-vendor_oppo_A37) @ `2e5c6f7` |
 
