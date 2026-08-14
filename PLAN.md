@@ -711,10 +711,24 @@ SEMUA LOLOS, dan system.img di dalam zip (sdat2img + debugfs) memuat blok `on in
 "mka bacon menulis ke inode yang sama" yang sudah dicatat di lineage_A37.mk; isinya
 build terbaru.
 
-### Fase 5 — Boot
-- [ ] Flash, dan **kalau gagal, ambil `console-ramoops` sebelum mencoba apa pun**
-- [ ] Jalan pulang disiapkan lebih dulu: `lineage-20.0-20260808_130815` dari Releases proyek
+### Fase 5 — Boot 🔄 BERJALAN
+- [x] Flash, dan **kalau gagal, ambil `console-ramoops` sebelum mencoba apa pun**
+- [x] Jalan pulang disiapkan lebih dulu: `lineage-20.0-20260808_130815` dari Releases proyek
       20 sudah diunduh (ROM LOS 20 **tidak ada lagi** di mesin build)
+- [x] **Lapis 1** — `ro.vndk.version=current` dibuang → linkerconfig tidak lagi SIGABRT
+- [x] **Lapis 2** — `ro.hardware.egl=adreno` → SurfaceFlinger hidup, boot animation jalan
+- [x] **Lapis 3** — dua tambalan bpf di `packages/modules/Connectivity` → netd tidak lagi
+      menggantung menunggu `bpf.progs_loaded`
+- [ ] Flash ROM hasil perbaikan lapis 3 dan lihat apakah sampai homescreen
+
+Tiga lapis itu ditemukan berurutan, masing-masing hanya terlihat setelah yang di atasnya
+dibereskan. Akar, bukti, dan nomor barisnya ada di `NOTES-boot-failure.md`
+(§"Tiga lapis penyebab"). Semuanya regresi Android 14 — LOS 20 boot tanpa satu pun.
+
+⚠️ Menaikkan batas `bootwatchdog` **tidak** akan pernah menolong untuk lapis 3:
+`NetdService.get()` dipanggil dengan timeout negatif sehingga
+`stop = Long.MAX_VALUE` (`NetdService.java:78-80`) — system_server menunggu netd
+**tanpa batas**, dan netd sendiri menunggu `bpf.progs_loaded` tanpa batas.
 
 ### Fase 6 — Fungsi, hanya setelah homescreen
 Kamera · RIL · Wi-Fi · Bluetooth · audio · sensor. Matriks paritas terhadap ROM 20.

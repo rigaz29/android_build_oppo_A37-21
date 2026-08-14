@@ -1,0 +1,29 @@
+diff --git a/netd/NetdUpdatable.cpp b/netd/NetdUpdatable.cpp
+index 681ea64e22..80e3d5f3f1 100644
+--- a/netd/NetdUpdatable.cpp
++++ b/netd/NetdUpdatable.cpp
+@@ -31,7 +31,23 @@ int libnetd_updatable_init(const char* cg2_path) {
+     LOG(INFO) << __func__ << ": Initializing";
+ 
+     char value[PROP_VALUE_MAX] = "";
+-    bool ebpf_supported = __system_property_get("ro.kernel.ebpf.supported", value) != 0 || strcmp(value, "false") == 0;
++    // Logika di hulu UL TERBALIK dan itu MENGGANTUNG BOOT. __system_property_get
++    // mengembalikan PANJANG nilai, bukan status: dengan ro.kernel.ebpf.supported=false
++    // ia mengembalikan 5, jadi `!= 0` benar, OR hubung-singkat, dan ebpf_supported
++    // menjadi true — persis kebalikan dari maksud commit d0ed2f82c4 ("Disable bpf
++    // initialization when eBPF is not available").
++    //
++    // Akibatnya di A37 (kernel 3.10, tanpa CONFIG_BPF_SYSCALL): BpfHandler::init()
++    // tetap dipanggil -> BpfHandler.cpp:166 waitForProgsLoaded() -> menunggu
++    // bpf.progs_loaded=1 SELAMANYA (backoff 5/10/20/40/60s). netd tidak pernah
++    // mendaftarkan servis binder-nya, system_server macet di
++    // StartNetworkManagementService dengan "null INetd instance", dan
++    // sys.boot_completed tidak pernah datang. Terekam di report/bootfail2/.
++    //
++    // Maksud yang benar: didukung kalau properti TIDAK ADA (perilaku bawaan hulu
++    // AOSP), atau ada tapi nilainya BUKAN "false".
++    bool ebpf_supported = __system_property_get("ro.kernel.ebpf.supported", value) == 0 ||
++                          strcmp(value, "false") != 0;
+     if (ebpf_supported) {
+         android::netdutils::Status ret = sBpfHandler.init(cg2_path);
+         if (!android::netdutils::isOk(ret)) {

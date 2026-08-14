@@ -162,7 +162,7 @@ nol jejak. Jadi kegagalan boot yang berakhir dengan pencabutan baterai tidak
 pernah bisa didiagnosis, dan itulah yang selama ini terjadi.
 
 Karena itu **pengaman boot** ditambahkan (`rootdir/etc/bootwatchdog.sh`, device
-tree commit `b871bcc`): kalau `sys.boot_completed` tidak muncul dalam 300 detik,
+tree commit `b871bcc`): kalau `sys.boot_completed` tidak muncul dalam 120 detik,
 jejak disimpan ke `/data/bootfail` lalu perangkat reboot ke recovery. `/data`
 tidak terenkripsi, jadi berkasnya terbaca dari recovery:
 
@@ -184,6 +184,103 @@ Empat kelas kegagalan dan penanganannya sekarang:
 hang **sudah** memicu watchdog bite, kenyataan bahwa perangkat diam tanpa reboot
 sudah membuktikan **tidak ada panic dan tidak ada CPU hang**. `boot-panic5.img`
 dengan demikian redundan — `panic=5` hanya menyetel nilai yang sudah 5.
+
+## Tiga lapis penyebab, semuanya ditemukan setelah ramoops hidup
+
+Begitu ramoops berfungsi, "stuck di logo OPPO" ternyata bukan satu bug melainkan
+tiga, bertumpuk. Masing-masing baru terlihat setelah yang di atasnya dibereskan.
+Ketiganya regresi Android 14 — LOS 20 boot tanpa satu pun perbaikan ini.
+
+| Lapis | Akar | Perbaikan | Bukti |
+|---|---|---|---|
+| 1 | `ro.vndk.version=current` padahal nol apex VNDK | properti DIBUANG dari `device.mk` | `report/1/pmsg-ramoops-0` |
+| 2 | `ro.hardware.egl` tidak diset → `libEGL_msm8916.so` dicari, ROM punya `libEGL_adreno.so` | `ro.hardware.egl=adreno` | `report/bootfail/` |
+| 3 | netd menggantung menunggu `bpf.progs_loaded` | dua tambalan di `packages/modules/Connectivity` | `report/bootfail2/` |
+
+### Lapis 1 — linkerconfig SIGABRT, jadi tidak ada dynamic linking sama sekali
+
+`ro.vndk.version=current` dengan nol apex VNDK membuat `variableloader.cc:84`
+keluar dini sehingga `SANITIZER_DEFAULT_VENDOR` tidak pernah terdefinisi, tapi
+`environment.cc:46 IsVendorVndkVersionDefined()` hanya memeriksa `has_value()` →
+`vendordefault.cc:57 Var("SANITIZER_DEFAULT_VENDOR")` → `context.cc:101
+CHECK(!"undefined var")` → SIGABRT. Tanpa `/linkerconfig/ld.config.txt`, SETIAP
+biner dinamis gagal dimuat dan zygote tidak pernah jalan.
+
+### Lapis 2 — SurfaceFlinger SIGABRT tiap 5 detik
+
+`Loader.cpp:291-304` menelusuri kandidat suffix driver; karena `ro.hardware.egl`
+kosong ia jatuh ke `ro.board.platform=msm8916`, mencoba `libEGL_msm8916.so`, lalu
+`break` — tidak mencoba kandidat lain. ROM mengirim `libEGL_adreno.so`.
+
+### Lapis 3 — netd menggantung selamanya, dan ini BUG DI PATCH UL SENDIRI
+
+Rantai lengkapnya, dari `report/bootfail2/`:
+
+```
+netbpfload (t=15,17s) keluar 1 di NetBpfLoad.cpp:377
+  -> execve ke /system/bin/bpfloader TIDAK PERNAH terjadi
+  -> bpf.progs_loaded tidak pernah tersetel oleh siapa pun
+netd -> libnetd_updatable_init -> kondisi ebpf TERBALIK -> BpfHandler::init()
+  -> BpfHandler.cpp:166 waitForProgsLoaded() menunggu SELAMANYA (5/10/20/40/60s)
+  -> netd tidak pernah mendaftarkan servis binder-nya
+system_server -> StartNetworkManagementService -> "null INetd instance" -> macet
+  -> sys.boot_completed tidak pernah datang -> bootwatchdog reboot ke recovery @120s
+```
+
+**Bug A — `netd/NetdUpdatable.cpp:34`, logika terbalik.**
+
+```c
+bool ebpf_supported = __system_property_get("ro.kernel.ebpf.supported", value) != 0
+                      || strcmp(value, "false") == 0;
+```
+
+`__system_property_get` mengembalikan **panjang** nilai, bukan status. Dengan
+`ro.kernel.ebpf.supported=false` ia mengembalikan 5 → `!= 0` benar → OR
+hubung-singkat → `ebpf_supported = true`. Persis kebalikan dari judul commit yang
+memperkenalkannya (UL `d0ed2f82c4`, "Disable bpf initialization when eBPF is not
+available"). Jadi **menyetel properti itu justru MENYEBABKAN hang yang ia
+maksudkan untuk mencegah.**
+
+**Bug B — `netbpfload/NetBpfLoad.cpp:377`, satu jalur keluar yang terlewat.**
+
+UL (`fce09cc548`) menambal setiap pemanggilan `createSysFsBpfSubDir` /
+`writeProcSysFile` di `main()` menjadi `failed = true`, termasuk baris 369 — tapi
+melewatkan `if (createSysFsBpfSubDir("loader")) return 1;` di baris 377. Kernel
+3.10 kita **tidak punya `CONFIG_BPF_SYSCALL` sama sekali** (diperiksa di
+`lineageos_a37f_defconfig`, 613 baris terbaca sebagai kontrol), jadi bpffs tidak
+terdaftar, `/sys/fs/bpf` tidak ada, mkdir gagal, dan netbpfload keluar sebelum
+`execve`. Justru di `/system/bin/bpfloader` itulah jalur gagal ber-patch UL
+menyetel `bpf.progs_loaded=1` (`system/bpf/bpfloader/BpfLoader.cpp:223`).
+
+Kegagalan ini **senyap total** karena UL sudah mengomentari `reboot_on_failure`
+di `netbpfload.rc`. Tambalan kita ada di
+`patches/packages_modules_Connectivity/`.
+
+Cukup Bug A saja sebenarnya untuk melepas hang — `waitForProgsLoaded()` hanya
+punya SATU pemanggil (`BpfHandler.cpp:166`, diverifikasi dengan grep seluruh
+`packages/modules/Connectivity`, `system/`, `frameworks/base`). Bug B ditambal
+juga karena ia satu baris, memulihkan maksud desain UL, dan melindungi kalau
+`reboot_on_failure` suatu saat dihidupkan kembali.
+
+Aman melewati `BpfHandler::init()`: `tagSocket` dijaga
+`if (!mCookieTagMap.isValid()) return -EPERM;` (`BpfHandler.cpp:199`), dan UL
+sudah mencabut abort-on-init-fail (`0012-Revert-netdupdatable-add-back-abort-on-init-fail`).
+
+### Pelajaran metodologi
+
+Dua kali dalam penelusuran ini instrumen yang salah hampir menyesatkan:
+
+- `dmesg.txt` dari `bootfail2` hanya mencakup detik **132–134** — ring buffer
+  kernel habis dibanjiri audit SELinux permissive. Pesan netbpfload dari detik 15
+  sudah tergusur, jadi ketiadaannya di dmesg **bukan** bukti ia tidak jalan.
+- `bpf.progs_loaded` tidak muncul di `getprop.txt` **dan** ada `avc: denied` untuk
+  `comm="getprop"` pada `bpf_prop`. Ketiadaan itu baru sah sebagai bukti setelah
+  dipastikan `ro.boot.selinux=permissive`, yang berarti denial dicatat tapi tidak
+  memblokir.
+- `find system/netd -name BpfHandler.cpp` mengembalikan kosong; berkasnya ada di
+  `packages/modules/Connectivity/netd/`. Dan servis `bpfloader` didefinisikan di
+  `netbpfload.rc`, bukan `bpfloader.rc` yang tidak ada di ROM — sempat membuat
+  saya membaca loader yang salah (`system/bpf/bpfloader/BpfLoader.cpp`).
 
 ## Jalan pulang
 

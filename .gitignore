@@ -27,6 +27,17 @@ research/
 work/*.log
 work/
 
+# Tangkapan diagnosis dari perangkat NYATA (ramoops, logcat, dmesg, getprop).
+#
+# ⚠️ TIDAK di-commit karena repo ini publik dan berkasnya memuat serial perangkat
+# (ro.serialno / ro.boot.serialno) di getprop.txt dan console-ramoops-0. Kalau
+# suatu saat perlu dibagikan, redaksi serialnya lebih dulu — seperti yang
+# dilakukan pada log perangkat di repo a37-twrp.
+#
+# NOTES-boot-failure.md merujuk isinya (report/1/, report/bootfail/,
+# report/bootfail2/) sebagai bukti; berkasnya hanya ada di mesin build.
+report/
+
 # Umum
 *.pyc
 __pycache__/
