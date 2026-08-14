@@ -302,7 +302,57 @@ yang **hanya** menggabung kalau sisi basis diff3 terbukti kosong dan berhenti ka
 tidak — supaya tidak ada resolusi diam-diam. Terpakai 5 kali: 4× `vendor/lineage`
 `config/BoardConfigSoong.mk`, 1× `device/lineage/sepolicy` `common/vendor/file_contexts`.
 
-**Belum dibangun** — build diserahkan ke pemilik proyek.
+### Build pertama basis official — gagal di soong, sudah diperbaiki (14 Agustus 2026)
+
+`m bacon` pertama berhenti di 32 detik, soong bootstrap:
+
+```
+error: frameworks/opt/net/wifi/libwifi_hal/Android.bp:152:1:
+  "libwifi_hal_vendor_impl_defaults" depends on undefined module "libwifi-hal-qcom".
+```
+
+**Akarnya: `<remove-project name="LineageOS/android_hardware_qcom_wlan" />` warisan
+era UL yang tidak digugurkan saat pindah basis.** Di UL repo itu memang harus dibuang
+(menabrak nama prebuilt `libwifi-hal-qcom` milik fork UL `frameworks/opt/net/wifi`).
+Di official kebalikannya: fork itu sudah membuang prebuilt-nya ("ff1f7d9f6 Remove
+makefile_goal workaround", "1dfa583cb Migrate libwifi-hal-qcom to Android.bp") dan
+`libwifi_hal/Android.bp:162` justru MENGGANTUNGKAN diri pada defaults modul
+`libwifi-hal-qcom` dari luar — yang hanya disediakan `hardware/qcom/wlan`.
+
+Klaim lama "repo itu hanya untuk wcn6740/wcn3990" (Fase 1.a) **tidak lengkap**.
+`Android.bp`-nya memilih lewat `BOARD_WLAN_CHIP`; A37 tidak menyetelnya sehingga jatuh
+ke `conditions_default` → `//hardware/qcom/wlan/legacy:libwifi-hal-qcom`, dan `legacy/`
+berisi `qcwcn/` — tepat HAL kita. Perbaikan: buang `<remove-project>`, `repo sync
+hardware/qcom/wlan`.
+
+**Dua delta device tree era-UL yang harus di-port ke basis official** — diidentifikasi
+dengan men-diff `lineage-21` (kini = `lineage-21-ul` @ `2941d27`) melawan arsip percobaan
+pertama (`archive/lineage-21-percobaan1` = `76582ce`). Hasil diff 20 berkas disisir; hanya
+dua yang delta fungsional era-basis, sisanya komentar atau perbaikan era-boot yang justru
+harus DIPERTAHANKAN (jadi TIDAK di-port balik):
+
+| Delta | Perbaikan | Kenapa |
+|---|---|---|
+| `android.hardware.wifi@1.0-service` | → `android.hardware.wifi-service` (AIDL) | HIDL wifi dicabut di A14; `hardware/interfaces/wifi/` tinggal `aidl/default`. `device.mk`, commit `0c8c59e` |
+| `QCOM_BOARD_PLATFORMS += msm8916` | ditambahkan di `BoardConfig.mk` | msm8916 dicabut dari `qcom_boards.mk` official; tanpa ini modul media dilaporkan hilang. Commit `0c8c59e` |
+
+Yang DISIRING dan diputuskan TIDAK di-port (tetap pakai versi `lineage-21` sekarang):
+`ro.hardware.egl=adreno` + dibuangnya `ro.vndk.version` (perbaikan boot lapis 1–2),
+`bootwatchdog.sh` (pengaman boot), `InProcessNetworkStack`/`com.android.tethering.inprocess`
+(sudah dipulihkan 67 patch UL — diverifikasi modulnya ADA), `framework_compatibility_matrix.xml`
+(entri identik, hanya komentar beda), seluruh `Android.mk` gps/power/sensors/libshims
+(hanya `LOCAL_HEADER_LIBRARIES` yang sama).
+
+**Satu perbaikan sepolicy:** cherry-pick UL `cc58fd9e2` (sysfs_disk_stat) mendarat di
+`public/file.te` dan prebuilts layout UL (`29.0..34.0`) tapi TIDAK di
+`prebuilts/api/202404/public/file.te` — versi prebuilt terbaru official. Tanpa mirror,
+`sepolicy_freeze_test` gagal. Ditambah satu baris, commit `a521ecece` di `system/sepolicy`
+(branch `lineage-21-a37`, lokal).
+
+Disk: `/root/twrp` (26 GB, proyek TWRP terpisah) dihapus atas persetujuan pemilik supaya
+pengemasan menyisakan ≥ 25 GB bebas (syarat §4.10).
+
+**Build kedua sedang berjalan** — hasil di §5 Fase 4/5.
 
 ## 3. Sumber daya
 
