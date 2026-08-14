@@ -226,6 +226,84 @@ sentuh.
 
 ---
 
+## 2b. Pindah KEMBALI ke basis official — 14 Agustus 2026
+
+Dikerjakan **setelah** tree UL terbukti boot sampai setup wizard. Urutannya penting:
+basis UL dipakai untuk menemukan dan memperbaiki empat lapis kegagalan boot, lalu
+perbaikannya dibawa ke official. Tiga dari empat lapis ternyata bug **device tree**
+(dipakai bersama kedua basis), sehingga kegagalan percobaan official yang dulu —
+mentok di logo OPPO — sudah dijelaskan seluruhnya oleh lapis 1.
+
+### Rollback tersedia, dan diverifikasi
+
+| Artefak | Isi |
+|---|---|
+| `/root/rom-los21-UL-093028-BOOT-OK.zip` | ROM UL yang boot; sha256 dicek ulang setelah `out/` dihapus |
+| `A37-21-pinned-UL-bootok.xml` | 1451 project ter-pin ke SHA — resep tree UL |
+| `.repo/project-objects/LineageOS-UL/` | 9,2 GB objek git UL, sengaja TIDAK dihapus |
+
+### Apa yang diambil dari UL, dan apa yang tidak
+
+67 dari 107 patch UL, dipilih lewat `tools/ul21-boot-minimal.map` (alasan per-repo
+ada di dalamnya). Yang ditinggalkan: `hardware_interfaces`, `frameworks_av`,
+`packages_modules_Bluetooth`, dan 9 patch kosmetik `frameworks_base`.
+
+Dua patch UL sendiri **berisi bug** yang menggantung netd, dan tambalan kita ikut
+dibawa: `patches/packages_modules_Connectivity/` (lihat NOTES §lapis 3).
+
+Satu patch kita **DIBUANG** di official: `packages_modules_IntentResolver/0001`.
+Ia ditulis karena `frameworks/base` fork UL hanya punya `resolveActivityAsUser`
+tiga argumen. Official punya overload empat argumen — diverifikasi di
+`frameworks/base/core/java/android/content/pm/PackageManager.java:7608`, yang
+meneruskan `resolvedType`. Memasangnya di official justru salah.
+
+### Enam project yang official TIDAK punya
+
+`hardware/qcom-caf/msm8916/{audio,display,media}` **tidak punya padanan official
+untuk Android 14**. Diperiksa ke hulu: `LineageOS/android_hardware_qcom_{audio,
+display,media}` menyediakan `caf-msm8916` hanya sampai `lineage-19.0`; untuk LOS 21
+yang ada cuma msm8953/8996/8998. LineageOS mencabut msm8916 sebagai ultra-legacy.
+
+Ketiganya diambil dari UL dan dipaku ke SHA yang sama dengan tree yang terbukti
+boot, supaya satu-satunya variabel yang berubah adalah basis platform. Ini bukan
+"kembali memakai basis UL" — art, bionic, frameworks, system semuanya official;
+yang diambil adalah dukungan perangkat keras untuk SoC yang ditinggalkan hulu,
+sederajat dengan blob vendor.
+
+Ditambah `device/qcom/sepolicy-legacy`, `system/tools/dtbtool`, dan
+`hardware/sony/timekeep` — ketiganya terbukti dipakai device tree kita
+(`BoardConfig.mk:508`, `BoardConfig.mk:279` `TARGET_CUSTOM_DTBTOOL := dtbToolOppo`,
+`device.mk:1001`). Dari 21 project yang ada di UL tapi tidak di official, hanya
+keenam ini yang diambil.
+
+### Dua jebakan yang tercatat supaya tidak terulang
+
+1. **`repo sync` mode interleaved DEADLOCK** saat 55 project berganti nama
+   (`LineageOS-UL/android_art` → `LineageOS/android_art`). Gejalanya khas: proses
+   hidup 5 menit tapi hanya memakai 6 detik CPU, nol berkas berubah, semua thread
+   di `futex_wait_queue`. Obatnya `--no-interleaved` (mode berfase) — selesai
+   bersih, exit 0.
+2. **Tanda hubung ganda tidak boleh ada di komentar XML.** `git ls-remote --heads`
+   di dalam komentar membuat parser menolak seluruh local manifest. Ini kedua
+   kalinya jebakan yang sama kena (sebelumnya `--git-lfs`).
+
+### Reproduksi
+
+```
+repo init -u https://github.com/LineageOS/android.git -b lineage-21.0
+repo sync -c -j8 --force-sync --no-clone-bundle --optimized-fetch --no-interleaved
+MAP="$(grep -v '^#' tools/ul21-boot-minimal.map)" tools/apply-ul21-patches.sh
+tools/apply-a37-patches.sh /root/los21
+git -C packages/modules/Connectivity apply patches/packages_modules_Connectivity/*.patch
+```
+
+Konflik `git am` yang murni aditif diselesaikan `tools/resolve-union-conflicts.sh`,
+yang **hanya** menggabung kalau sisi basis diff3 terbukti kosong dan berhenti kalau
+tidak — supaya tidak ada resolusi diam-diam. Terpakai 5 kali: 4× `vendor/lineage`
+`config/BoardConfigSoong.mk`, 1× `device/lineage/sepolicy` `common/vendor/file_contexts`.
+
+**Belum dibangun** — build diserahkan ke pemilik proyek.
+
 ## 3. Sumber daya
 
 ### 3.1 Repo milik proyek

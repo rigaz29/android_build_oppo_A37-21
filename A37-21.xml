@@ -2,15 +2,20 @@
 <!--
   Local manifest — LineageOS 21 (Android 14, SDK 34) untuk OPPO A37 / A37f / A37fw.
 
-  Basis: LineageOS-UL/android lineage-21.0 (manifest a156f53, 2025-04-04, ASB 2025-03).
+  Basis: LineageOS/android lineage-21.0 — OFFICIAL, sejak 14 Agustus 2026.
 
-      repo init -u https://github.com/LineageOS-UL/android.git -b lineage-21.0 (plus opsi git-lfs)
+      repo init -u https://github.com/LineageOS/android.git -b lineage-21.0
 
-  Berkas ini SENGAJA pendek. Percobaan pertama (basis official) butuh delapan project di
-  sini; dengan basis UL hanya tiga yang tersisa, karena UL menyediakan sisanya lewat
-  snippets/losul.xml (61 project fork) dan snippets/lineage.xml.
+  SEBELUMNYA basis LineageOS-UL, dan tree UL itulah yang pertama kali boot sampai
+  setup wizard. Resep persisnya dibekukan di a37-21/A37-21-pinned-UL-bootok.xml
+  (1451 project ter-pin ke SHA) dan ROM-nya di /root/rom-los21-UL-093028-BOOT-OK.zip,
+  jadi rollback tetap mungkin. Objek git UL juga masih ada di .repo/project-objects.
 
-  Diverifikasi terhadap manifest UL yang ter-checkout, 10 Agustus 2026:
+  Karena basis pindah, berkas ini KEMBALI PANJANG: sembilan project. Blok di bawah
+  yang menjelaskan "kelimanya DIBUANG" berlaku untuk basis UL dan kini kebalikannya
+  — UL menyediakannya lewat snippets/losul.xml, official TIDAK.
+
+  Diverifikasi terhadap manifest UL yang dulu ter-checkout, 10 Agustus 2026:
 
     losul.xml:12   device/qcom/sepolicy-legacy           lineage-21.0-legacy
     losul.xml:72   hardware/qcom-caf/msm8916/audio       lineage-21.0-caf-msm8916
@@ -83,5 +88,65 @@
   <project name="rigaz29/rb-vendor_oppo_A37" path="vendor/oppo"
            remote="gh" revision="2e5c6f7ffcccbbf1430f8fa13fc530e1cae5feab"
            upstream="lineage-18.1" />
+
+  <!-- ================================================================
+       ENAM PROYEK DI BAWAH: dibutuhkan lagi sejak basis pindah ke OFFICIAL
+       ================================================================
+       Header berkas ini menulis "dengan basis UL hanya tiga yang tersisa".
+       Itu benar untuk UL. Di basis official kelimanya kembali jadi pekerjaan
+       kita, plus dtbtool. Diverifikasi di manifest official yang TER-RESOLVE
+       (`repo manifest`), bukan di snippet: nol kecocokan untuk msm8916.
+
+       Ketiga HAL msm8916 TIDAK PUNYA PADANAN OFFICIAL untuk Android 14.
+       Diperiksa langsung ke hulu dengan `git ls-remote` (opsi heads).
+       Catatan: tanda hubung ganda TIDAK BOLEH muncul di komentar XML — itu yang
+       membuat versi pertama blok ini ditolak parser di baris ini juga:
+
+         LineageOS/android_hardware_qcom_{audio,display,media}
+           punya  lineage-17.0/17.1/18.0/18.1/19.0-caf-msm8916
+           TIDAK punya 20.0 maupun 21.0 untuk msm8916
+           yang ada untuk LOS 21 hanya msm8953, msm8996, msm8998
+
+       LineageOS mencabut msm8916 sebagai ultra-legacy; UL mempertahankannya dan
+       branch lineage-21.0-caf-msm8916 adalah SATU-SATUNYA versi siap-A14.
+       Mengambilnya dari UL bukan "kembali memakai basis UL": ini dukungan
+       perangkat keras untuk SoC yang sudah ditinggalkan hulu, sederajat dengan
+       blob vendor. Basis platform (art, bionic, frameworks, system) tetap
+       official sepenuhnya. Alternatifnya mem-port lineage-19.0 ke A14 sendiri —
+       pekerjaan yang sudah UL selesaikan.
+
+       Revisi DIPAKU ke SHA yang sama dengan tree UL yang TERBUKTI boot sampai
+       setup wizard (A37-21-pinned-UL-bootok.xml), supaya satu-satunya variabel
+       yang berubah adalah basis platform, bukan HAL-nya juga.
+
+       Bukti tiap proyek benar-benar dipakai perangkat ini, bukan disalin borongan:
+         sepolicy-legacy  device/oppo/A37/BoardConfig.mk:508
+         dtbtool          BoardConfig.mk:279  TARGET_CUSTOM_DTBTOOL := dtbToolOppo
+         timekeep         device.mk:1001 (PRODUCT_PACKAGES) — dan servisnya memang
+                          jalan di perangkat: ro.boottime.timekeep ada di
+                          report/bootfail3/getprop.txt
+       Dari 21 proyek yang ada di UL tapi tidak di official, HANYA keenam ini yang
+       diambil. Sisanya (msm8952/8960/8974/8994, NFC, external/connectivity) milik
+       SoC atau fitur lain dan sengaja ditinggalkan. -->
+
+  <project name="LineageOS-UL/android_hardware_qcom_audio" path="hardware/qcom-caf/msm8916/audio"
+           remote="gh" revision="1b2c9f8e95f74f724894cbbe89b92d16239aff26"
+           upstream="lineage-21.0-caf-msm8916" />
+  <project name="LineageOS-UL/android_hardware_qcom_display" path="hardware/qcom-caf/msm8916/display"
+           remote="gh" revision="c9d61b95f6ad6aebc5d2f33837b036dc55ac9365"
+           upstream="lineage-21.0-caf-msm8916" />
+  <project name="LineageOS-UL/android_hardware_qcom_media" path="hardware/qcom-caf/msm8916/media"
+           remote="gh" revision="ee0cb10a3b8388bd24f78530b64204aeb185affc"
+           upstream="lineage-21.0-caf-msm8916" />
+
+  <project name="LineageOS-UL/android_device_qcom_sepolicy" path="device/qcom/sepolicy-legacy"
+           remote="gh" revision="3fc6662b09bae2307a64cce5dca8e28ef43edc70"
+           upstream="lineage-21.0-legacy" />
+  <project name="LineageOS-UL/android_system_tools_dtbtool" path="system/tools/dtbtool"
+           remote="gh" revision="ffd4bcb0e07a135e9bb65b07e33f6c8f5f1c47b9"
+           upstream="lineage-21.0" />
+  <project name="LineageOS/android_hardware_sony_timekeep" path="hardware/sony/timekeep"
+           remote="gh" revision="11c1535c71b97f0ab833e215a8121ed107235010"
+           upstream="lineage-21" />
 
 </manifest>

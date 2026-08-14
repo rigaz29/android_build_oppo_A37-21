@@ -1,0 +1,107 @@
+# ul21-boot-minimal.map — subset patch UL yang dibutuhkan basis OFFICIAL
+# untuk boot normal sampai setup wizard. Bukan paritas fungsi.
+#
+# Pakai:
+#   MAP="$(grep -v '^#' tools/ul21-boot-minimal.map)" ./tools/apply-ul21-patches.sh
+#
+# Format: repo-patches : path-di-tree : rentang-patch (kosong = semua)
+#
+# ---------------------------------------------------------------------------
+# DIAMBIL — pemblokir boot atau pemblokir build
+# ---------------------------------------------------------------------------
+#
+# art, external_perfetto  gerbang memfd_create. Kernel 3.10 tidak punya
+#                         memfd_create; device tree kita menyetel
+#                         TARGET_HAS_MEMFD_BACKPORT (terverifikasi di BoardConfig).
+#                         traced jalan sejak awal boot, jadi ini bukan opsional.
+#
+# system_bpf              bpfloader non-fatal. MANIFEST.md menandainya pemblokir
+#                         boot eksplisit: official menjadikan kegagalan eBPF fatal
+#                         (sleep 20; return 2) dan di kernel 3.10 eBPF PASTI gagal.
+#
+# system_netd,            seluruh jalur BPF-less. Ini yang menghasilkan lapis 3 di
+# packages_modules_       basis UL — dan dua bug di dalamnya sudah kita perbaiki,
+#   Connectivity          dipasang terpisah dari patches/packages_modules_Connectivity/.
+#
+# packages_modules_       opt-out netlink + TCP info. T0 di MANIFEST.
+#   NetworkStack
+#
+# system_core             cgroup v1 — kernel 3.10 tidak punya cgroup v2 — plus
+#                         inprocess tethering, yang berpasangan dengan revert di
+#                         Connectivity dan system_sepolicy. Jangan pisahkan.
+#
+# vendor_lineage          memulihkan flag TARGET_* yang device tree kita BENAR-BENAR
+#                         pakai. Terverifikasi ada di BoardConfig.mk:
+#                           TARGET_HAS_LEGACY_CAMERA_HAL1
+#                           TARGET_HAS_MEMFD_BACKPORT
+#                           TARGET_PROCESS_SDK_VERSION_OVERRIDE
+#                           TARGET_DISABLE_POSTRENDER_CLEANUP
+#                         0008 dan 0011 DIBUANG, alasan di MANIFEST.md: 0008
+#                         bergerbang flag yang tidak kita setel dan konflik; 0011
+#                         isinya sudah ada di tree.
+#
+# system_sepolicy,        msm8916 kembali masuk qcom/sepolicy.mk legacy. Ini sisi
+# device_lineage_sepolicy build: tanpa itu sepolicy tidak kompilasi untuk platform
+#                         ultra-legacy.
+#
+#
+# frameworks_base         12 dari 21. Yang diambil dan kenapa:
+#                           0003 WebView non-multiprocess  perangkat 2 GB, low_ram
+#                           0007 tunda kill cached proc    perilaku boot low-RAM
+#                           0008 process group failure     cgroup, pemblokir boot
+#                           0009 ignore cgroup errors      cgroup, pemblokir boot
+#                           0010-0013 freezer ke cgroup v1 kernel 3.10 tanpa v2
+#                           0018 vendor mismatch warning   perangkat non-Treble
+#                           0020 IR HAL tidak dideklarasi  cegah crash system_server
+#                           0021 reorder tanpa qtaguid     qtaguid tidak ada di 3.10
+#                           0022 SensorPrivacy exception   cegah crash
+#
+# ---------------------------------------------------------------------------
+# TIDAK DIAMBIL — tidak dibutuhkan sampai setup wizard
+# ---------------------------------------------------------------------------
+#
+# hardware_interfaces     4 patch. audio 2.0 TIDAK RELEVAN: vintf kita
+#                         mendeklarasikan android.hardware.audio versi 6.0
+#                         (diverifikasi di device/oppo/A37/manifest.xml). HIDL WiFi
+#                         tidak dideklarasikan manifest kita sama sekali.
+#
+# frameworks_av           6 patch. libaudiohal 2.0 idem tidak relevan; kamera HAL1
+#                         dan SCO bukan syarat boot.
+#
+# packages_modules_       4 patch. Bluetooth bukan syarat boot.
+#   Bluetooth
+#
+# frameworks_base sisa    9 patch kosmetik/hardware lain: ColorFade exynos4-mali,
+#                         GPS week rollover, stretch effect, ripple PATTERNED,
+#                         batterysaver night mode, kurva brightness, bool timestamp
+#                         sensor, visible flag sdcard, BiometricScheduler.
+#
+# frameworks_native       SENGAJA TIDAK DI SINI — ditangani tools/apply-a37-patches.sh
+#                         bagian 3, yang memasang patches/frameworks_native/ (16).
+#
+#                         Kedua seri ISINYA SAMA. Diverifikasi dengan membandingkan
+#                         himpunan Subject: identik kecuali satu patch milik kita
+#                         (0016, mNeedsPostRenderCleanup). Yang membedakan bukan
+#                         isi melainkan KESIAPAN untuk official: komentar
+#                         apply-a37-patches.sh:59-61 mencatat bahwa patch 0004 seri
+#                         kita sudah membawa RESOLUSI KONFLIK MANUAL terhadap
+#                         mNeedsPostRenderCleanup — anggota yang hanya ada di
+#                         official dan tidak dikenal UL. Seri ul21 adalah ekstraksi
+#                         mentah tanpa resolusi itu.
+#
+#                         Memasang keduanya = konflik. Pilih seri kita.
+#                         Ini pemblokir tampilan, bukan opsional: blob Adreno 306
+#                         kita hanya GLES sedangkan A14 default ke Skia/Vulkan.
+#
+# ---------------------------------------------------------------------------
+art:art:
+external_perfetto:external/perfetto:
+system_bpf:system/bpf:
+packages_modules_NetworkStack:packages/modules/NetworkStack:
+vendor_lineage:vendor/lineage:000[1-7],0009,0010,0012
+system_core:system/core:
+system_netd:system/netd:
+packages_modules_Connectivity:packages/modules/Connectivity:
+system_sepolicy:system/sepolicy:
+device_lineage_sepolicy:device/lineage/sepolicy:
+frameworks_base:frameworks/base:0003,0007,0008,0009,001[0-3],0018,0020,0021,0022

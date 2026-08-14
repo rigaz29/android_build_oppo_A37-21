@@ -13,7 +13,14 @@ sk(){ printf '\033[1;34m ::\033[0m %s\n' "$1"; }
 rc=0
 
 # repo-patches : path-di-tree : rentang-patch (kosong = semua)
-MAP="
+#
+# Rentang boleh berupa BEBERAPA glob dipisah koma, mis. `0008,001[0-3],0021`.
+# Itu dibutuhkan sejak basis official: subset yang diperlukan untuk boot tidak
+# selalu bersambung (lihat tools/ul21-boot-minimal.map).
+#
+# MAP bisa ditimpa dari environment untuk menerapkan subset:
+#   MAP="$(grep -v '^#' tools/ul21-boot-minimal.map)" ./tools/apply-ul21-patches.sh
+MAP="${MAP:-
 art:art:
 external_perfetto:external/perfetto:
 system_bpf:system/bpf:
@@ -29,14 +36,24 @@ packages_modules_Bluetooth:packages/modules/Bluetooth:
 frameworks_av:frameworks/av:
 frameworks_base:frameworks/base:
 frameworks_native:frameworks/native:000[1-6]
-"
+}"
 
 for line in $MAP; do
     name=${line%%:*}; rest=${line#*:}; path=${rest%%:*}; glob=${rest#*:}
     d="$TREE/$path"; src="$P/$name"
     [ -d "$src" ] || { sk "$name: belum diekstrak"; continue; }
     [ -d "$d/.git" ] || { no "$path: bukan repo git"; rc=1; continue; }
-    pats=$(ls "$src"/${glob:-}*.patch 2>/dev/null)
+    if [ -n "$glob" ]; then
+        # Beberapa glob dipisah koma. Diurutkan setelahnya supaya `git am`
+        # tetap menerima patch dalam urutan nomor aslinya, bukan urutan glob.
+        pats=""; oifs=$IFS; IFS=','
+        for g in $glob; do pats="$pats$(ls "$src"/$g*.patch 2>/dev/null)
+"; done
+        IFS=$oifs
+        pats=$(printf '%s' "$pats" | grep -v '^$' | sort -u)
+    else
+        pats=$(ls "$src"/*.patch 2>/dev/null)
+    fi
     [ -n "$pats" ] || { sk "$name: tidak ada patch"; continue; }
     last=$(basename "$(echo "$pats" | tail -1)" .patch | sed 's/^[0-9]*-//')
     subj=$(echo "$last" | tr '-' ' ')
