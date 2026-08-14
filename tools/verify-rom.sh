@@ -40,14 +40,33 @@ if [ -n "$BPS" ]; then
         if [ "$got" = "$want" ]; then ok "$key=$got"
         else bad "$key='$got', diharapkan '$want' — $why"; fi
     }
+    # properti yang WAJIB TIDAK ADA, dan alasannya
+    check_prop_absent() {
+        local key="$1" why="$2"
+        local got
+        got=$(grep -hE "^$key=" $BPS 2>/dev/null | head -1 | cut -d= -f2-)
+        if [ -z "$got" ]; then ok "$key tidak ada (memang harus begitu)"
+        else bad "$key='$got' ADA padahal harus absen — $why"; fi
+    }
     check_prop ro.build.version.sdk 34            "LOS 21 itu Android 14"
-    check_prop ro.kernel.ebpf.supported false     "gerbang W1/W2; tanpa false, bpfloader menggagalkan boot"
+    check_prop ro.kernel.ebpf.supported false     "kernel 3.10 tanpa CONFIG_BPF_SYSCALL; dibaca NetdUpdatable.cpp untuk MELEWATI BpfHandler::init()"
     check_prop ro.config.low_ram true             "perangkat 2 GB, sama dengan ROM referensi"
     check_prop external_storage.casefold.enabled 0 "ext4 kernel 3.10 tidak punya casefold"
     check_prop external_storage.sdcardfs.enabled 0 "A13 memakai FUSE"
     check_prop ro.treble.enabled false            "perangkat non-treble"
     check_prop ro.zygote zygote32                 "userspace 32-bit murni"
-    check_prop ro.vndk.version current            "tanpa snapshot VNDK, sama dengan ROM gt58wifi"
+
+    # ⚠️ DIBALIK dari versi pertama skrip ini, yang menuntut ro.vndk.version=current
+    # dengan alasan "sama dengan ROM gt58wifi". Itu TERBUKTI SALAH dan justru
+    # penyebab stuck di logo OPPO (lapis 1, lihat NOTES-boot-failure.md): dengan
+    # nol apex VNDK, linkerconfig SIGABRT di context.cc:101 sehingga
+    # /linkerconfig/ld.config.txt tidak pernah ada dan SETIAP biner dinamis gagal.
+    # Jangan tambahkan properti ini kembali.
+    check_prop_absent ro.vndk.version              "nol snapshot VNDK -> linkerconfig SIGABRT -> tidak ada ld.config.txt (lapis 1)"
+
+    # Lapis 2: tanpa ini Loader.cpp:291-304 jatuh ke ro.board.platform, mencari
+    # libEGL_msm8916.so, lalu break — padahal ROM mengirim libEGL_adreno.so.
+    check_prop ro.hardware.egl adreno             "SurfaceFlinger SIGABRT tiap 5 detik tanpa ini (lapis 2)"
 else
     bad "tidak ada build.prop sama sekali — build belum sampai tahap pengemasan?"
 fi
