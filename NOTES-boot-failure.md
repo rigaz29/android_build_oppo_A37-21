@@ -266,6 +266,48 @@ Aman melewati `BpfHandler::init()`: `tagSocket` dijaga
 `if (!mCookieTagMap.isValid()) return -EPERM;` (`BpfHandler.cpp:199`), dan UL
 sudah mencabut abort-on-init-fail (`0012-Revert-netdupdatable-add-back-abort-on-init-fail`).
 
+### Lapis 3 TERBUKTI SEMBUH — dan yang tersisa cuma pengamannya sendiri
+
+`report/bootfail3/` (ROM `073305`, tambalan bpf terpasang) membuktikannya:
+
+| | bootfail2 (sebelum) | bootfail3 (sesudah) |
+|---|---|---|
+| `bpf.progs_loaded` | tidak ada | **`1`** |
+| baris `BpfHandler` menunggu | 2 | **0** |
+| netd | menggantung, di-SIGQUIT, mati | **melayani binder** (`firewallSetFirewallType`, `networkSetPermissionForUser`, `tetherGetStats`) |
+| system_server sampai | `StartNetworkManagementService` | **`OnBootPhase_600`** = PHASE_THIRD_PARTY_APPS_CAN_START |
+| zygote sudah mem-fork | — | **`com.android.launcher3`**, `com.android.systemui`, `permissioncontroller` |
+
+Nol `Fatal signal`, nol `WATCHDOG KILLING`, nol ANR. Boot itu **sehat sepenuhnya**
+— ia dipotong `bootwatchdog` di detik 120 satu-dua detik sebelum homescreen.
+
+Sebabnya `odrefresh`, kompilasi ulang boot classpath ART:
+
+```
+odrefresh: No prior cache-info file   -> kompilasi penuh, 190x dex2oat
+21:20:52,6 -> 21:22:14,2             = 81,5 detik
+exit(80) "compiled all artifacts" -> "On-device signing done."
+celah ro.boottime: odsign 15,8s -> apexd-snapshotde 98,3s, cocok persis
+```
+
+⚠️ Asumsi lama di `bootwatchdog.sh` ("`WITH_DEXPREOPT=true` jadi tidak ada dexopt
+besar di boot pertama") **salah**: dexpreopt menghilangkan dexopt APLIKASI, bukan
+`odrefresh`, yang dipicu artefak APEX yang tidak cocok dengan hasil build.
+
+Ini biaya **sekali saja** — artefaknya tersimpan di
+`/data/misc/apexdata/com.android.art/dalvik-cache/` dan selamat saat reboot ke
+recovery, jadi boot berikutnya melewatinya tanpa perlu flash ulang. Perbaikan
+permanennya di device tree `2941d27`: waktu selama `init.svc.odsign` = `running`
+tidak dihitung, ditambah pagu mutlak 600 detik supaya `dex2oat` yang benar-benar
+menggantung tetap tertangkap.
+
+### Sisa yang belum dibereskan, terlihat di bootfail3
+
+`/vendor/bin/hw/android.hardware.bluetooth@1.0-service-qti` crash-loop tiap 5
+detik: `CANNOT LINK EXECUTABLE ... library "android.hardware.bluetooth@1.0.so"
+not found`. HIDL Bluetooth dicabut di Android 14. Tidak memblokir boot — masuk
+Fase 6.
+
 ### Pelajaran metodologi
 
 Dua kali dalam penelusuran ini instrumen yang salah hampir menyesatkan:

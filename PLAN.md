@@ -719,7 +719,14 @@ build terbaru.
 - [x] **Lapis 2** — `ro.hardware.egl=adreno` → SurfaceFlinger hidup, boot animation jalan
 - [x] **Lapis 3** — dua tambalan bpf di `packages/modules/Connectivity` → netd tidak lagi
       menggantung menunggu `bpf.progs_loaded`
-- [ ] Flash ROM hasil perbaikan lapis 3 dan lihat apakah sampai homescreen
+- [x] Flash ROM hasil perbaikan lapis 3 — **lapis 3 terbukti sembuh**
+      (`report/bootfail3/`: `bpf.progs_loaded=1`, netd melayani binder,
+      system_server sampai `OnBootPhase_600`, `com.android.launcher3` sudah di-fork)
+- [x] **Lapis 4** — bukan bug ROM: `bootwatchdog` memotong boot yang sehat di detik
+      120 karena `odrefresh` memakan 81,5 detik di boot pertama. Diperbaiki di device
+      tree `2941d27` (waktu kompilasi ART tidak dihitung + pagu mutlak 600s)
+- [ ] **Reboot ke system** — kompilasi ART sudah tersimpan di `/data`, jadi boot
+      berikutnya melewatinya. Tidak perlu flash ulang untuk mencobanya.
 
 Tiga lapis itu ditemukan berurutan, masing-masing hanya terlihat setelah yang di atasnya
 dibereskan. Akar, bukti, dan nomor barisnya ada di `NOTES-boot-failure.md`
