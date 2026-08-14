@@ -352,7 +352,61 @@ Yang DISIRING dan diputuskan TIDAK di-port (tetap pakai versi `lineage-21` sekar
 Disk: `/root/twrp` (26 GB, proyek TWRP terpisah) dihapus atas persetujuan pemilik supaya
 pengemasan menyisakan ≥ 25 GB bebas (syarat §4.10).
 
-**Build kedua sedang berjalan** — hasil di §5 Fase 4/5.
+### Build kedua–ketujuh: wlan qcwcn — dua provider, satu desain (14 Agustus 2026)
+
+Build #2 lolos soong tapi gagal di kati:
+
+```
+"hostapd ... missing lib_driver_cmd_qcwcn (STATIC_LIBRARIES android-arm)"
+```
+
+**Akarnya baru terlihat utuh di build #6:** manifest official mendeklarasikan repo yang
+SAMA di DUA path —
+
+```
+default.xml:960          hardware/qcom/wlan       @ lineage-21.0
+snippets/lineage.xml:162 hardware/qcom-caf/wlan   @ lineage-21.0-caf
+```
+
+— dan `remove-project` era UL menghapus keduanya (berdasarkan nama). Migrasi hanya
+menghidupkan kembali yang pertama.
+
+**Jalan buntu yang informatif (build #3–#5):** patch guard `os_pickup_aosp.mk` (symlink
+`hardware/qcom/Android.mk`) supaya cabang `BOARD_USES_QCOM_HARDWARE=true` ikut
+meng-include `wlan/` → make module legacy `hardware/qcom/wlan` terbangun. Lolos sampai
+**80%** (satu error trivial: `wcnss_service.c` legacy kurang `#include <string.h>`,
+commit `a268a06`). Tapi build #6 membuktikan pendekatan itu **melawan desain**:
+`vendor/lineage/build/core/qcom_target.mk` mendaftarkan pathmap
+`qcom-wlan → hardware/qcom-caf/wlan` untuk SEMUA device `BOARD_USES_QCOM_HARDWARE=true`,
+sehingga guard top-level repo CAF (`ifeq ($(call my-dir),$(call project-path-for,qcom-wlan))`)
+AKTIF — kedua provider mendefinisikan `wpa_supplicant.conf` (dan akan menyusul
+`lib_driver_cmd_qcwcn`, `wcnss_service`) → error definisi ganda.
+
+**Solusi akhir (build #7) — mengikuti desain LOS:**
+
+| Peran | Provider | Catatan |
+|---|---|---|
+| Soong: `libwifi-hal-qcom` + `libcld80211` (dipakai `frameworks/opt/net/wifi`) | `hardware/qcom/wlan` (`legacy/*.bp`, namespace sendiri) | bp diparse selalu; make-nya tetap ter-guard (keymaster saja) setelah patch guard di-REVERT (`b06768a`) |
+| Make: `lib_driver_cmd_qcwcn`, `wcnss_service`, `wpa_supplicant.conf`, `libwifi-hal-qcom` (make) | `hardware/qcom-caf/wlan` @ `lineage-21.0-caf` | aktif lewat pathmap `qcom-wlan`; namespace soong-nya terpisah → tidak tabrakan nama dengan sisi legacy |
+
+Dua pelajaran sisanya:
+- `repo manifest -r` (dipakai langkah `build-manifest` saat pengemasan) menuntut SETIAP
+  project di manifest ADA di disk — jadi `hardware/qcom-caf/wlan` wajib di-sync meski
+  (sebelum paham pathmap) sempat dikira bisa diabaikan.
+- `wcnss_service`: kembalikan konfigurasi OSS LOS 20 — `TARGET_USES_QCOM_WCNSS_QMI=true`
+  + `TARGET_PROVIDES_WCNSS_QMI=true` → `-DWCNSS_QMI_OSS + libdl` (dlopen
+  `libwcnss_qmi.so` saat runtime). Versi CAF sudah include `<string.h>` dan jalur OSS
+  inilah yang dipakai ROM LOS 20 A37 yang wifi-nya berfungsi. `USES=true` TANPA
+  `PROVIDES=true` dilarang: cabangnya menuntut `libqmi_cci` dkk. yang tak ada di tree.
+
+**HASIL: build #7 `m bacon -j6` rc=0** → `lineage-21.0-20260814_175052-UNOFFICIAL-A37.zip`
+(725.696.584 B). `verify-rom.sh /root/los21/out/target/product/A37` **SEMUA LOLOS**
+(termasuk `ro.hardware.egl=adreno`, `ro.vndk.version` absen, 320 blob, sepolicy split
+A14, adbd FunctionFS legacy, geometri boot.img). Pemeriksaan artefak Fase 4 diulang pada
+zip yang dikirim: cmdline ramoops lengkap (`console_size=0x100000 pmsg_size=0x40000
+dump_oops=1 ecc=1`), ramdisk memuat `/adb_keys` + `/init`, `installed-files.txt` memuat
+`/system/vendor/bin/bootwatchdog.sh` serta stack wifi baru
+(`wpa_supplicant`, `hostapd`, `android.hardware.wifi-service` AIDL, `wcnss_service`).
 
 ## 3. Sumber daya
 
@@ -838,6 +892,20 @@ SEMUA LOLOS, dan system.img di dalam zip (sdat2img + debugfs) memuat blok `on in
 ⚠️ Ketiga zip (`_024200`, `_065240`, `ota`) menunjuk inode yang sama — perilaku
 "mka bacon menulis ke inode yang sama" yang sudah dicatat di lineage_A37.mk; isinya
 build terbaru.
+
+#### 4.b Build basis OFFICIAL pertama yang lolos — `20260814_175052` (14 Agustus 2026)
+
+`m bacon -j6` rc=0 (15:34, inkremental) →
+`lineage-21.0-20260814_175052-UNOFFICIAL-A37.zip` (725.696.584 B). Ini build pertama
+yang lolos seluruh gerbang di **basis official**. Tujuh pemblokir (soong
+`libwifi-hal-qcom`, kati `lib_driver_cmd_qcwcn`, definisi ganda `wpa_supplicant.conf`,
+`build-manifest` `repo manifest -r`, `string.h` wcnss, mirror sepolicy 202404, dan
+konfigurasi wcnss OSS) — akar dan perbaikannya didokumentasikan rinci di §2b subjudul
+"Build pertama basis official" dan "Build kedua–ketujuh". Verifikasi ulang:
+`verify-rom.sh /root/los21/out/target/product/A37` **SEMUA LOLOS**; pemeriksaan artefak
+yang dikirim (cmdline ramoops, `/adb_keys`, `bootwatchdog.sh`, stack wifi
+`wpa_supplicant`/`hostapd`/`android.hardware.wifi-service` AIDL/`wcnss_service`)
+semua ada. **Selanjutnya: Fase 5 — flash dan boot di basis official.**
 
 ### Fase 5 — Boot 🔄 BERJALAN
 - [x] Flash, dan **kalau gagal, ambil `console-ramoops` sebelum mencoba apa pun**
