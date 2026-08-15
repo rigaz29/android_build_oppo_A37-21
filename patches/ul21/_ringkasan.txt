@@ -11,3 +11,4 @@ frameworks_native	15
 packages_modules_Bluetooth	4
 frameworks_av	6
 frameworks_base	23
+build_soong	3

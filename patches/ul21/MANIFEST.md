@@ -71,3 +71,39 @@ apa yang Fase 3 tambal manual di `BoardConfig.mk`, sehingga workaround tersebut
 menambah tipe itu **sengaja dibuang** karena "mengulangi pemblokir 5.1b/5.1d",
 dan sisi sepolicy-legacy ditangani dengan MEMBUANG label-nya. Perlu ditinjau
 apakah deklarasi kita masih diperlukan setelah seri sepolicy UL terpasang.
+
+## `build_soong` — diekstrak, TIDAK dipasang (15 Agustus 2026)
+
+Diekstrak untuk menguji dugaan bahwa mekanisme `TARGET_LD_SHIM_LIBS` berasal dari
+fork `build/soong` UL, setelah shim tampak tidak berfungsi di basis official.
+
+**Dugaan itu salah.** Tiga patch yang ada tidak satu pun menyentuh shim:
+
+| Patch | Isi |
+|---|---|
+| 0001 | tambah `xz` ke allowed list (`ui/build/paths/config.go`) |
+| 0002 | workaround `manifest_check.py` untuk jar yang merusak build |
+| 0003 | `[UL] Revert "Remove makefile_goal"` — kembalikan tipe modul `makefile_goal` |
+
+Tidak dipasang: tidak ada yang dibutuhkan. `makefile_goal` khususnya justru TIDAK
+diinginkan — `frameworks/opt/net/wifi` official sudah pindah dari mekanisme itu
+("Remove makefile_goal workaround", "Migrate libwifi-hal-qcom to Android.bp"), dan
+itulah sebabnya `hardware/qcom/wlan` dipertahankan di local manifest.
+
+### Yang sebenarnya terjadi dengan shim
+
+Mekanismenya **lengkap di basis official** dan tidak pernah hilang:
+
+```
+vendor/lineage/build/soong/Android.bp:211   shim_libs_defaults
+    -> cppflags -DLD_SHIM_LIBS="<daftar>"
+bionic/linker/Android.bp:78                 memakai shim_libs_defaults
+bionic/linker/linker.cpp:693,712,1367       parse_LD_SHIM_LIBS()
+```
+
+⚠️ Shim **tidak pernah** muncul di `DT_NEEDED` blob — linker memuatnya saat runtime.
+Jadi `readelf -d <blob>` adalah instrumen yang SALAH, dan hasil nol darinya bukan
+bukti shim mati. Instrumen yang benar: string `LD_SHIM_LIBS` di dalam biner linker,
+dan **ambil hash intermediate yang mtime-nya sesuai build terakhir** — direktori
+hash lama tetap tertinggal dan memberi jawaban basi. Rinciannya di
+`device/oppo/A37/BoardConfig.mk` di atas `TARGET_LD_SHIM_LIBS`.

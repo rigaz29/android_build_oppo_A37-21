@@ -1,0 +1,249 @@
+From 54bbb0bfa9742ff1004b98233a75239deab236ca Mon Sep 17 00:00:00 2001
+From: Yaroslav Zviezda <acroreiser@gmail.com>
+Date: Sun, 7 Apr 2024 21:35:44 +0300
+Subject: [PATCH 3/3] [UL] Revert "Remove makefile_goal"
+
+Needed to build libwifi-hal.
+
+This reverts commit a2b57abb4ab379ae3f3747e0c97efabeacdf4a28.
+---
+ android/Android.bp         |  1 +
+ android/makefile_goal.go   | 98 ++++++++++++++++++++++++++++++++++++++
+ android/neverallow.go      | 15 ++++++
+ android/neverallow_test.go | 59 +++++++++++++++++++++++
+ 4 files changed, 173 insertions(+)
+ create mode 100644 android/makefile_goal.go
+
+diff --git a/android/Android.bp b/android/Android.bp
+index 2ac1d5fbe..aecad7b70 100644
+--- a/android/Android.bp
++++ b/android/Android.bp
+@@ -58,6 +58,7 @@ bootstrap_go_package {
+         "license_metadata.go",
+         "license_sdk_member.go",
+         "licenses.go",
++        "makefile_goal.go",
+         "makevars.go",
+         "metrics.go",
+         "module.go",
+diff --git a/android/makefile_goal.go b/android/makefile_goal.go
+new file mode 100644
+index 000000000..07354a648
+--- /dev/null
++++ b/android/makefile_goal.go
+@@ -0,0 +1,98 @@
++// Copyright 2020 Google Inc. All rights reserved.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package android
++
++import (
++	"fmt"
++	"io"
++	"path/filepath"
++
++	"github.com/google/blueprint/proptools"
++)
++
++func init() {
++	RegisterModuleType("makefile_goal", MakefileGoalFactory)
++}
++
++type makefileGoalProperties struct {
++	// Sources.
++
++	// Makefile goal output file path, relative to PRODUCT_OUT.
++	Product_out_path *string
++}
++
++type makefileGoal struct {
++	ModuleBase
++
++	properties makefileGoalProperties
++
++	// Destination. Output file path of this module.
++	outputFilePath OutputPath
++}
++
++var _ AndroidMkEntriesProvider = (*makefileGoal)(nil)
++var _ OutputFileProducer = (*makefileGoal)(nil)
++
++// Input file of this makefile_goal module. Nil if none specified. May use variable names in makefiles.
++func (p *makefileGoal) inputPath() *string {
++	if p.properties.Product_out_path != nil {
++		return proptools.StringPtr(filepath.Join("$(PRODUCT_OUT)", proptools.String(p.properties.Product_out_path)))
++	}
++	return nil
++}
++
++// OutputFileProducer
++func (p *makefileGoal) OutputFiles(tag string) (Paths, error) {
++	if tag != "" {
++		return nil, fmt.Errorf("unsupported tag %q", tag)
++	}
++	return Paths{p.outputFilePath}, nil
++}
++
++// AndroidMkEntriesProvider
++func (p *makefileGoal) DepsMutator(ctx BottomUpMutatorContext) {
++	if p.inputPath() == nil {
++		ctx.PropertyErrorf("product_out_path", "Path relative to PRODUCT_OUT required")
++	}
++}
++
++func (p *makefileGoal) GenerateAndroidBuildActions(ctx ModuleContext) {
++	filename := filepath.Base(proptools.String(p.inputPath()))
++	p.outputFilePath = PathForModuleOut(ctx, filename).OutputPath
++
++	ctx.InstallFile(PathForModuleInstall(ctx, "etc"), ctx.ModuleName(), p.outputFilePath)
++}
++
++func (p *makefileGoal) AndroidMkEntries() []AndroidMkEntries {
++	return []AndroidMkEntries{AndroidMkEntries{
++		Class:      "ETC",
++		OutputFile: OptionalPathForPath(p.outputFilePath),
++		ExtraFooters: []AndroidMkExtraFootersFunc{
++			func(w io.Writer, name, prefix, moduleDir string) {
++				// Can't use Cp because inputPath() is not a valid Path.
++				fmt.Fprintf(w, "$(eval $(call copy-one-file,%s,%s))\n", proptools.String(p.inputPath()), p.outputFilePath)
++			},
++		},
++	}}
++}
++
++// Import a Makefile goal to Soong by copying the file built by
++// the goal to a path visible to Soong. This rule only works on boot images.
++func MakefileGoalFactory() Module {
++	module := &makefileGoal{}
++	module.AddProperties(&module.properties)
++	InitAndroidModule(module)
++	return module
++}
+diff --git a/android/neverallow.go b/android/neverallow.go
+index f721b945c..fe5e2851d 100644
+--- a/android/neverallow.go
++++ b/android/neverallow.go
+@@ -55,6 +55,7 @@ func init() {
+ 	AddNeverAllowRules(createJavaDeviceForHostRules()...)
+ 	AddNeverAllowRules(createCcSdkVariantRules()...)
+ 	AddNeverAllowRules(createUncompressDexRules()...)
++	AddNeverAllowRules(createMakefileGoalRules()...)
+ 	AddNeverAllowRules(createInitFirstStageRules()...)
+ 	AddNeverAllowRules(createProhibitFrameworkAccessRules()...)
+ 	AddNeverAllowRules(createBp2BuildRule())
+@@ -239,6 +240,20 @@ func createUncompressDexRules() []Rule {
+ 	}
+ }
+ 
++func createMakefileGoalRules() []Rule {
++	allowlist := []string{
++		// libwifi_hal uses makefile_goal for its dependencies
++		"frameworks/opt/net/wifi/libwifi_hal",
++	}
++	return []Rule{
++		NeverAllow().
++			ModuleType("makefile_goal").
++			WithoutMatcher("product_out_path", Regexp("^boot[0-9a-zA-Z.-]*[.]img$")).
++			NotIn(allowlist...).
++			Because("Only boot images may be imported as a makefile goal if not in allowed projects"),
++	}
++}
++
+ func createInitFirstStageRules() []Rule {
+ 	return []Rule{
+ 		NeverAllow().
+diff --git a/android/neverallow_test.go b/android/neverallow_test.go
+index b2620ef92..5c91d416a 100644
+--- a/android/neverallow_test.go
++++ b/android/neverallow_test.go
+@@ -313,6 +313,45 @@ var neverallowTests = []struct {
+ 			"module \"outside_art_libraries\": violates neverallow",
+ 		},
+ 	},
++	{
++		name: "disallowed makefile_goal",
++		fs: map[string][]byte{
++			"Android.bp": []byte(`
++				makefile_goal {
++					name: "foo",
++					product_out_path: "boot/trap.img"
++				}
++			`),
++		},
++		expectedErrors: []string{
++			"Only boot images.* may be imported as a makefile goal",
++		},
++	},
++	{
++		name: "disallowed makefile_goal outside external",
++		fs: map[string][]byte{
++			"project/Android.bp": []byte(`
++				makefile_goal {
++					name: "foo",
++					product_out_path: "obj/EXE/foo",
++				}
++			`),
++		},
++		expectedErrors: []string{
++			"not in allowed projects",
++		},
++	},
++	{
++		name: "allow makefile_goal within external",
++		fs: map[string][]byte{
++			"frameworks/opt/net/wifi/libwifi_hal/Android.bp": []byte(`
++				makefile_goal {
++					name: "foo",
++					product_out_path: "obj/EXE/foo",
++				}
++			`),
++		},
++	},
+ 	// Tests for the rule prohibiting the use of framework
+ 	{
+ 		name: "prohibit framework",
+@@ -384,6 +423,7 @@ var prepareForNeverAllowTest = GroupFixturePreparers(
+ 		ctx.RegisterModuleType("java_library", newMockJavaLibraryModule)
+ 		ctx.RegisterModuleType("java_library_host", newMockJavaLibraryModule)
+ 		ctx.RegisterModuleType("java_device_for_host", newMockJavaLibraryModule)
++		ctx.RegisterModuleType("makefile_goal", newMockMakefileGoalModule)
+ 	}),
+ )
+ 
+@@ -483,3 +523,22 @@ func newMockJavaLibraryModule() Module {
+ 
+ func (p *mockJavaLibraryModule) GenerateAndroidBuildActions(ModuleContext) {
+ }
++
++type mockMakefileGoalProperties struct {
++	Product_out_path *string
++}
++
++type mockMakefileGoalModule struct {
++	ModuleBase
++	properties mockMakefileGoalProperties
++}
++
++func newMockMakefileGoalModule() Module {
++	m := &mockMakefileGoalModule{}
++	m.AddProperties(&m.properties)
++	InitAndroidModule(m)
++	return m
++}
++
++func (p *mockMakefileGoalModule) GenerateAndroidBuildActions(ModuleContext) {
++}
+-- 
+2.43.0
+
