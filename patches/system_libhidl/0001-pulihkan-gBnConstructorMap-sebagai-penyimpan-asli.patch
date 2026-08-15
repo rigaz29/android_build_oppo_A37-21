@@ -1,0 +1,83 @@
+diff --git a/transport/Static.cpp b/transport/Static.cpp
+index fe7c0f0..47d6395 100644
+--- a/transport/Static.cpp
++++ b/transport/Static.cpp
+@@ -35,14 +35,74 @@ DoNotDestruct<ConcurrentMap<const ::android::hidl::base::V1_0::IBase*,
+ DoNotDestruct<ConcurrentMap<wp<::android::hidl::base::V1_0::IBase>, SchedPrio>> gServicePrioMap{};
+ DoNotDestruct<ConcurrentMap<wp<::android::hidl::base::V1_0::IBase>, bool>> gServiceSidMap{};
+ 
++// ABI LAMA DIPULIHKAN — dan ini PENYIMPAN ASLI, bukan salinan terpisah.
++//
++// AOSP mengubah variabel global gBnConstructorMap/gBsConstructorMap menjadi
++// fungsi accessor. Blob QTI pra-A11 di perangkat ini merujuk simbol variabelnya
++// langsung, dan tanpa simbol itu linker menolak memuatnya:
++//
++//   cannot locate symbol "_ZN7android8hardware7details17gBnConstructorMapE"
++//     referenced by com.quicinc.cne.api@1.0.so          -> netmgrd
++//     referenced by vendor.qti.hardware.perf@1.0_vendor.so -> perf-hal-1-0
++//     referenced by vendor.qti.hardware.fm@1.0.so       -> bluetooth-1-0-qti
++//
++// ⚠️ KENAPA hardware/lineage/compat libhidlbase_shim TIDAK CUKUP.
++//
++// Shim itu mendeklarasikan `DoNotDestruct<BnConstructorMap> gBnConstructorMap{}`
++// SENDIRI — objek yang BERBEDA dari yang dikembalikan getBnConstructorMap().
++// Linking jadi berhasil, tapi blob mendaftarkan konstruktornya ke peta shim
++// sementara HidlBinderSupport.cpp:256 mencarinya di peta libhidlbase. Hasilnya
++// terbukti di perangkat (15 Agustus 2026, ROM 20260815_113452):
++//
++//   F HidlSupport: getOrCreateCachedBinder getBnConstructorMap returned null
++//                  for vendor.qti.hardware.perf@1.0::IPerf
++//   F libc     : Fatal signal 6 (SIGABRT) in perf@1.0-servic
++//
++// Jadi shim memindahkan kegagalan satu tahap lebih dalam, bukan menyelesaikannya.
++//
++// Dengan menjadikan variabel globalnya sebagai penyimpan yang SEBENARNYA dan
++// accessor sekadar mengembalikannya, kedua jalur memakai peta yang sama. Ini juga
++// menghapus kebutuhan memetakan shim per-blob satu per satu — simbolnya kini
++// datang dari libhidlbase, jadi SEMUA blob lama tertangani sekaligus.
++//
++// Tipenya DoNotDestruct<...>, sama dengan pilihan shim LineageOS, supaya tata
++// letaknya cocok dengan yang diharapkan blob.
++// ⚠️ init_priority WAJIB — tanpa itu SIGSEGV di konsumen yang menaut STATIS.
++//
++// Versi pertama patch ini tanpa init_priority, dan hasilnya crash di dua tempat
++// (terverifikasi di perangkat, ROM 20260815_140441):
++//
++//   droid.bluetooth   SIGSEGV fault addr 0x0
++//     #00 libbluetooth_jni.so   android::hardware::Concur...
++//   mediaextractor    SIGSEGV fault addr 0x0
++//     #00 libmpeg2extractor.so  android::hardware::Concur...
++//
++// Sempat diduga soal urutan muat antar-pustaka. BUKAN. Kedua pustaka itu punya
++// SALINAN STATIS libhidl di dalamnya — diverifikasi dengan nm pada biner
++// unstripped, simbolnya LOKAL ('b' dan 't', bukan dinamis):
++//
++//   b android::hardware::details::gBnConstructorMap
++//   t android::hardware::details::getBnConstructorMap()
++//
++// Jadi kode ini ikut terkompilasi ke dalam mereka, dan masalahnya urutan
++// inisialisasi statis ANTAR-TU DI DALAM SATU DSO — yang standar C++ memang tidak
++// menentukan. Satu TU memanggil getBsConstructorMap() di inisialisasi statisnya
++// sebelum TU ini sempat mengonstruksi objeknya -> peta belum ada -> deref null.
++//
++// Itu persis alasan hulu memakai function-local static (construct on first use),
++// dan itulah yang hilang saat variabel globalnya dipulihkan. init_priority
++// mengembalikan jaminannya: inisialisasi berprioritas dijalankan LEBIH DULU
++// daripada yang tanpa prioritas di DSO yang sama. 101 = paling awal yang boleh.
++#define HIDL_COMPAT_INIT_PRIORITY __attribute__((init_priority(101)))
++HIDL_COMPAT_INIT_PRIORITY DoNotDestruct<BnConstructorMap> gBnConstructorMap{};
++HIDL_COMPAT_INIT_PRIORITY DoNotDestruct<BsConstructorMap> gBsConstructorMap{};
++
+ BnConstructorMap& getBnConstructorMap() {
+-    static BnConstructorMap& map = *new BnConstructorMap();
+-    return map;
++    return gBnConstructorMap.get();
+ }
+ 
+ BsConstructorMap& getBsConstructorMap() {
+-    static BsConstructorMap& map = *new BsConstructorMap();
+-    return map;
++    return gBsConstructorMap.get();
+ }
+ 
+ }  // namespace details

@@ -1078,3 +1078,89 @@ grep -rn "msm8916/audio" .repo/manifests/*.xml .repo/manifests/snippets/*.xml
 # §4.8 jumlah apex terkompresi
 ls out/target/product/A37/system/apex/*.capex | wc -l
 ```
+
+---
+
+## 2c. Status penutup — 15 Agustus 2026
+
+Proyek dihentikan sementara di sini. Tree `/root/los21` (263 GB) DIHAPUS; resepnya
+utuh di `A37-21-pinned-official.xml` (1437 project ter-pin) + 138 berkas `patches/`.
+
+### Yang sudah bekerja di basis official
+
+Boot sampai **setup wizard dan homescreen**. Diverifikasi lewat adb langsung ke
+perangkat (Tailscale), bukan dari log:
+
+| Subsistem | Status |
+|---|---|
+| Wi-Fi | ✅ `wlan0` UP, tersambung SSID |
+| Sensor | ✅ 4 sensor h/w aktif |
+| Audio | ✅ `audioserver` + `vendor.audio-hal` running |
+| RIL | ⚠️ `rild` running, telephony menjawab, `OUT_OF_SERVICE` — **belum diuji, tidak ada SIM** |
+| Bluetooth | ❌ HAL terdaftar, stack JNI crash |
+| Kamera | ❌ 0 perangkat |
+
+### Enam lapis penyebab yang sudah dibereskan
+
+1. `ro.vndk.version=current` → linkerconfig SIGABRT (device tree)
+2. `ro.hardware.egl` tidak diset → SurfaceFlinger SIGABRT (device tree)
+3. Dua bug jalur no-bpf UL → netd menggantung (`patches/packages_modules_Connectivity`)
+4. `bootwatchdog` memotong boot sehat saat `odrefresh` (device tree `2941d27`)
+5. `PRODUCT_COMPRESSED_APEX` (dikerjakan pemilik proyek)
+6. `bionic` `rename()` memakai `renameat2`, ENOSYS di kernel 3.10 (dikerjakan pemilik proyek)
+
+### ⚠️ Yang BELUM diuji dan jadi langkah pertama kalau dilanjutkan
+
+`patches/system_libhidl` — pemulihan `gBnConstructorMap`/`gBsConstructorMap`
+plus `init_priority`. ROM `20260815_144822` memuatnya tapi **belum pernah di-flash**.
+
+Riwayatnya penting supaya tidak diulang: versi tanpa `init_priority` SUDAH diuji
+dan **merusak** — SIGSEGV `fault addr 0x0` di `libbluetooth_jni.so` dan
+`libmpeg2extractor.so`. Akarnya bukan urutan muat antar-pustaka melainkan urutan
+inisialisasi statis ANTAR-TU DI DALAM satu DSO: `nm` pada biner unstripped
+membuktikan kedua pustaka itu menaut libhidl STATIS (simbolnya lokal, `b` dan `t`),
+jadi kode patch ikut terkompilasi ke dalamnya. `init_priority(101)` mengembalikan
+jaminan yang hilang; terverifikasi menghasilkan seksi `init_array.101` di
+`Static.o`, tapi efeknya di perangkat belum dibuktikan.
+
+Kalau ternyata masih crash, `git revert` patch itu mengembalikan keadaan ROM
+`20260815_113452` (media sehat, Bluetooth dan perf-hal rusak).
+
+### Kamera — akar sudah ditemukan, perbaikan belum diputuskan
+
+`libshim_camera` terpasang ke `/system/lib`, bukan `/vendor/lib`, karena
+`LOCAL_VENDOR_MODULE` sengaja dilepas (ia menaut pustaka `native:platform` yang
+ditolak `binary.mk:1328` untuk modul vendor). Tapi `TARGET_LD_SHIM_LIBS`
+memetakannya ke tiga blob **vendor**, yang tidak bisa melihat `/system/lib`.
+Pemetaan ke shim yang tidak terjangkau **menggagalkan pemuatan blob** — mode
+kegagalan `libcutils_shim` yang sudah tercatat di `BoardConfig.mk`.
+
+Dua jalan, belum dipilih: (a) cabut ketiga pemetaan kamera — murah, dan hasilnya
+menentukan apakah (b) perlu; (b) pecah shim jadi versi vendor-safe.
+
+### adb USB — diselidiki tuntas, belum terpecahkan
+
+Sisi perangkat terbukti bersih: gadget `CONFIGURED` stabil 90 detik tanpa transisi,
+adbd tanpa restart, endpoint FFS terbentuk, 79 pemicu `init.qcom.usb.rc` lengkap.
+adb client 37.0.1 (terbaru). Bukan bentrokan transport USB/wireless (diuji).
+
+Petunjuk yang menyempitkan: **tidak ada pop-up otorisasi di USB, ada di wireless**,
+padahal `ro.adb.secure=1` berlaku untuk keduanya dan adbd-nya satu proses. Artinya
+paket dari host tidak pernah tiba di adbd — otorisasi bahkan belum jadi pertanyaan.
+Tersangka tersisa: jalur baca/tulis `usb_legacy.cpp` non-AIO (`aio_compat=1`).
+
+Alatnya sudah disiapkan: `persist.adb.trace_mask=usb,transport` aktif otomatis
+setelah adbd start ulang. Tangkap `logcat -s adbd:V` dengan kabel tercolok.
+
+### Cabang LOS 20
+
+`rb_device_oppo_A37` dan `kernel_oppo_msm8939` sama-sama punya branch `lineage-20`
+berisi ramoops lengkap + pengaman boot. **Manifest LOS 20 harus diarahkan ke branch
+kernel itu**, kalau tidak seluruh blok ramoops diam tanpa suara.
+
+### Artefak yang TIDAK bisa dibuat ulang — jangan dihapus
+
+- `ref/` (620 MB) — ROM jangkar a6000, **tidak punya URL publik**
+- `report/` (14 MB) — `bootfail1`–`bootfail5`, gitignored jadi tidak ada di GitHub
+- `/root/rom-los21-UL-093028-BOOT-OK.zip` — basis UL, terbukti boot
+- `/root/rom-los21-official-144822.zip` — basis official, build terakhir
