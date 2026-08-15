@@ -907,6 +907,42 @@ yang dikirim (cmdline ramoops, `/adb_keys`, `bootwatchdog.sh`, stack wifi
 `wpa_supplicant`/`hostapd`/`android.hardware.wifi-service` AIDL/`wcnss_service`)
 semua ada. **Selanjutnya: Fase 5 — flash dan boot di basis official.**
 
+#### 4.c Build #8/#9 — perbaikan bootloop APEX terkompres (15 Agustus 2026)
+
+Build `20260814_175052` **tidak boot** (bootloop; log `report/bootfail4/`). Tiga
+kegagalan independen yang menunjuk satu akar — **APEX tidak aktif di perangkat**:
+
+```
+app_process  : CANNOT LINK ... libnativeloader.so not found   ← zygote mati, TANPA system_server
+mediaextractor: Could not read base policy file '/apex/com.android.media/etc/seccomp_policy/mediaextractor.policy'
+netd         : CANNOT LINK ... libnetd_updatable.so not found ← ada di apex tethering.inprocess
+odrefresh    : exited unexpectedly, returned 255              ← /apex/com.android.art/bin/dex2oat32 tak ada
+```
+
+Pembanding dengan UL yang boot-OK (`rom-los21-UL-093028-BOOT-OK.zip`, di-`sdat2img`):
+UL mengirim `system/apex/*.apex` **tak terkompres**; basis official mengirim
+`*.capex` **terkompres** (31 terkompres vs 0). Akar: tree official menyalakan
+`PRODUCT_COMPRESSED_APEX := true` (`build/make/target/product/updatable_apex.mk:26`,
+commit "Enable apex compression on all devices with updatable apex" yang
+di-re-land + "Remove TARGET_FLATTEN_APEX"). Klaim PLAN §4.8 bahwa ini "sudah `false`
+di basis" diverifikasi di basis **UL** (`1d10d6898b` TIDAK ADA di tree official) —
+migrasi UL→official menghidupkannya kembali secara diam-diam. Gejala pendukung:
+`vold` gagal rename `obb.new` dan `installd` gagal tulis `layout_version` dengan
+`Function not implemented` (ENOSYS) — TIDAK ada di boot UL — dan `/data` tidak di-wipe
+(koleksi bootfail4 masih dari data lama; `keystore2` `database schema has changed`).
+
+**Perbaikan:** `PRODUCT_COMPRESSED_APEX := false` — TIDAK cukup di `device.mk`
+(penyelesaian variabel produk tetap memenangkan nilai dari rantai inherit);
+harus di `lineage_A37.mk` SETELAH semua `inherit-product`. Build #9
+`m bacon -j6` rc=0 → `lineage-21.0-20260815_004346-UNOFFICIAL-A37.zip`
+(718.064.001 B); isi zip terverifikasi (sdat2img + debugfs): 22 `.apex`, 0 `.capex`.
+`verify-rom.sh` SEMUA LOLOS. **Disarankan wipe `/data` sebelum flash** (hindari
+sisa data era UL: `/data/apex` lama, skema keystore2 beda, `obb.new` tertinggal).
+
+⚠️ Disk: build #10 sempat gagal di OTA packaging karena **No space left on device**
+(image membengkak ~1,5 GB → ~2,9 GB tanpa kompresi; butuh ±6 GB untuk
+`system.new.dat` + brotli + zip). Pastikan ≥ 16 GB bebas sebelum `m bacon`.
+
 ### Fase 5 — Boot 🔄 BERJALAN
 - [x] Flash, dan **kalau gagal, ambil `console-ramoops` sebelum mencoba apa pun**
 - [x] Jalan pulang disiapkan lebih dulu: `lineage-20.0-20260808_130815` dari Releases proyek
@@ -923,6 +959,12 @@ semua ada. **Selanjutnya: Fase 5 — flash dan boot di basis official.**
       tree `2941d27` (waktu kompilasi ART tidak dihitung + pagu mutlak 600s)
 - [ ] **Reboot ke system** — kompilasi ART sudah tersimpan di `/data`, jadi boot
       berikutnya melewatinya. Tidak perlu flash ulang untuk mencobanya.
+- [x] **Lapis 5 (basis official)** — bootloop APEX: basis official mengirim `*.capex`
+      terkompres, apexd gagal mendekompresi → zygote tak bisa link `libnativeloader.so`
+      (apex art), mediaextractor tanpa policy, netd tanpa `libnetd_updatable`.
+      Diperbaiki `PRODUCT_COMPRESSED_APEX := false` di `lineage_A37.mk` (build #9,
+      rincian §4.c). **Belum diuji di perangkat** — flash `20260815_004346` +
+      wipe `/data`.
 
 Tiga lapis itu ditemukan berurutan, masing-masing hanya terlihat setelah yang di atasnya
 dibereskan. Akar, bukti, dan nomor barisnya ada di `NOTES-boot-failure.md`
