@@ -124,7 +124,27 @@ else
     else git -C "$D" am --abort >/dev/null 2>&1; no "build/make: git am GAGAL"; rc=1; fi
 fi
 
-# --- 7. penjaga regresi ----------------------------------------------------
+# --- 7. seri patch bionic (rename() kembali ke renameat) -------------------
+# Kernel 3.10 A37 tidak punya syscall renameat2 (arch/arm/kernel/calls.S:382
+# = sys_ni_syscall, selalu ENOSYS). Bionic official memanggil renameat2 di
+# dalam rename(), sehingga SEMUA rename di /data gagal ENOSYS: vold
+# (obb.new), installd (layout_version), dan derive_classpath -- yang terakhir
+# membuat /data/system/environ/classpath kosong -> BOOTCLASSPATH tidak
+# terdefinisi -> zygote abort 'BOOTCLASSPATH and DEX2OATBOOTCLASSPATH must
+# not be empty' -> bootloop (report/bootfail5). Sama dengan revert
+# LineageOS-UL android_bionic 76aa2d240664.
+P=/root/a37-21/patches/bionic
+D=bionic
+if [ ! -d "$D" ]; then no "$D tidak ada"; rc=1
+elif git -C "$D" log --oneline -1 --grep="kembalikan rename() ke syscall renameat" | grep -q .; then
+    ok "bionic: revert renameat2 sudah terpasang"
+elif [ "$CHECK" = 1 ]; then do_ "bionic: PERLU terapkan $P"
+else
+    if git -C "$D" am "$P"/*.patch >/dev/null 2>&1; then ok "bionic: patch terpasang"
+    else git -C "$D" am --abort >/dev/null 2>&1; no "bionic: git am GAGAL"; rc=1; fi
+fi
+
+# --- 8. penjaga regresi ----------------------------------------------------
 echo; echo "-- penjaga regresi --"
 c(){ if [ -e "$1" ]; then ok "$2"; else no "$2 -- HILANG"; rc=1; fi; }
 c frameworks/native/libs/renderengine/gl \

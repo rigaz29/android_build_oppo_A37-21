@@ -943,6 +943,53 @@ sisa data era UL: `/data/apex` lama, skema keystore2 beda, `obb.new` tertinggal)
 (image membengkak ~1,5 GB → ~2,9 GB tanpa kompresi; butuh ±6 GB untuk
 `system.new.dat` + brotli + zip). Pastikan ≥ 16 GB bebas sebelum `m bacon`.
 
+#### 4.d Build #10 — perbaikan bootloop #2: bionic `rename()` → `renameat2` (15 Agustus 2026)
+
+Build `20260815_004346` tetap tidak boot (log `report/bootfail5/`). APEX kali ini
+AKTIF (netd jalan — `libnetd_updatable_init` sukses, `art_boot` jalan — prop
+`dalvik.vm.features.*` muncul), tapi zygote abort tiap ±5 detik:
+
+```
+odrefresh  : Abort message: 'BOOTCLASSPATH is not defined.'
+zygote     : Check failed: !location.empty() BOOTCLASSPATH and DEX2OATBOOTCLASSPATH must not be empty
+```
+
+**Rantai penyebab (dibuktikan sampai syscall):**
+
+1. `init.rc` mendefinisikan `*CLASSPATH` lewat `exec_start derive_classpath` →
+   `load_exports /data/system/environ/classpath` (`/system/etc/init/hw/init.rc`,
+   baris `# Define and export *CLASSPATH variables`).
+2. `derive_classpath` (biner di apex sdkext) menulis `classpath.tmp` lalu
+   **`rename()`** ke `/data/system/environ/classpath` — GAGAL, jadi file exports
+   tidak pernah ada → `load_exports` kosong → env BOOTCLASSPATH tidak didefinisikan.
+3. Akar: **bionic official `rename()` memanggil syscall `renameat2`**
+   (`bionic/libc/bionic/rename.cpp`), dan kernel 3.10 A37 TIDAK punya renameat2 —
+   `arch/arm/kernel/calls.S:382` = `sys_ni_syscall` (selalu ENOSYS). Efek samping
+   yang sama menjelaskan `vold: Failed to rename /data/media/obb.new ... Function
+   not implemented` dan `installd: Failed to save version ... layout_version` —
+   dua-duanya rename() di /data, dua-duanya ENOSYS, dan dua-duanya TIDAK ada di
+   boot UL.
+4. UL lolos karena **LineageOS-UL sengaja me-revert** "Rewrite renameat()" di
+   bionic (`76aa2d240664`, "We still want to support kernels without renameat2")
+   — tapi ekstraksi patch UL (`tools/extract-ul21-patches.sh`) hanya mencakup
+   T0–T2 (17 repo) dan **bionic tidak termasuk**. Migrasi UL→official
+   menghidupkan kembali renameat2 secara diam-diam, persis pola jebakan APEX §4.c.
+
+**Perbaikan:** patch `patches/bionic/0001-*` (revert "Rewrite renameat()" ala UL:
+`rename()` → `renameat`, `SYSCALLS.TXT` mengembalikan baris renameat; `renameat2()`
+tetap dipertahankan sebagai fungsi ekspor untuk kompatibilitas API). Dipasang lewat
+`tools/apply-a37-patches.sh` (bagian 7 baru). Build #10 `m bacon -j6` rc=0 →
+`lineage-21.0-20260815_040004-UNOFFICIAL-A37.zip` (718.058.531 B); libc di dalam
+zip diverifikasi via debugfs+llvm-objdump: `rename()` melompat ke
+`__ThumbV7PILongThunk_renameat`, bukan renameat2. `verify-rom.sh` SEMUA LOLOS.
+
+**Catatan pencegahan:** dua revert UL lain di bionic (`Extend LOAD segment VMAs`,
+`Extend GNU_RELRO protection`) BELUM dibawa — belum terbukti memblokir (semua
+proses ber-exec normal); jemalloc dan cache hosts file juga dibiarkan. Revert
+`renameat` ini satu-satunya syscall modern yang hilang dari kernel (sisanya
+memfd_create/seccomp/getrandom sudah di-backport; statx tidak dipakai bionic
+karena fallback fstatat64).
+
 ### Fase 5 — Boot 🔄 BERJALAN
 - [x] Flash, dan **kalau gagal, ambil `console-ramoops` sebelum mencoba apa pun**
 - [x] Jalan pulang disiapkan lebih dulu: `lineage-20.0-20260808_130815` dari Releases proyek
@@ -965,6 +1012,12 @@ sisa data era UL: `/data/apex` lama, skema keystore2 beda, `obb.new` tertinggal)
       Diperbaiki `PRODUCT_COMPRESSED_APEX := false` di `lineage_A37.mk` (build #9,
       rincian §4.c). **Belum diuji di perangkat** — flash `20260815_004346` +
       wipe `/data`.
+- [x] **Lapis 6 (basis official)** — bootloop #2: bionic official `rename()` memakai
+      syscall `renameat2` yang tidak ada di kernel 3.10 (ENOSYS) → `derive_classpath`
+      gagal menulis `/data/system/environ/classpath` → BOOTCLASSPATH kosong → zygote
+      abort. UL me-revert ini (`76aa2d240664`) tapi ekstraksi patch tidak mencakup
+      bionic. Diperbaiki `patches/bionic/` (build #10, rincian §4.d). **Belum diuji
+      di perangkat** — flash `20260815_040004`.
 
 Tiga lapis itu ditemukan berurutan, masing-masing hanya terlihat setelah yang di atasnya
 dibereskan. Akar, bukti, dan nomor barisnya ada di `NOTES-boot-failure.md`
